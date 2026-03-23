@@ -3,16 +3,16 @@
 Quick test: fetch one sample from DCGM Exporter and print it.
 
 Usage:
-    python quick_test.py
-    python quick_test.py http://198.19.44.210:9400/metrics
+    python quick_test.py <dcgm-exporter-url>
 """
 
+import os
 import sys
 from scrape import parse_metrics_page, fetch_endpoint
 
 
 def main():
-    url = sys.argv[1] if len(sys.argv) > 1 else "http://198.19.44.210:9400/metrics"
+    url = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("DCGM_EXPORTER_URL", "")
 
     print(f"Fetching {url}...")
     try:

@@ -51,11 +51,23 @@ log = logging.getLogger(__name__)
 
 # ── Config ───────────────────────────────────────────────────────────
 
+def _resolve_env_vars(obj):
+    """Recursively resolve ${VAR} placeholders from environment variables."""
+    if isinstance(obj, str) and obj.startswith("${") and obj.endswith("}"):
+        return os.environ.get(obj[2:-1], obj)
+    if isinstance(obj, dict):
+        return {k: _resolve_env_vars(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_env_vars(v) for v in obj]
+    return obj
+
+
 def load_config(config_path: str = None) -> dict:
     if config_path is None:
         config_path = Path(__file__).parent / "config.yaml"
     with open(config_path) as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    return _resolve_env_vars(config)
 
 
 def get_all_metrics(config: dict) -> list[str]:

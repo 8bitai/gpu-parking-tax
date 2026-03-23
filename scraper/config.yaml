@@ -1,7 +1,7 @@
 # GPU Telemetry Scraper Configuration
 # Uses Prometheus API (with DCGM Exporter as fallback)
 
-prometheus_url: "https://prometheus.8bit.ai"
+prometheus_url: "${PROMETHEUS_URL}"
 
 # TLS verification — set false if using self-signed certs
 verify_ssl: false
@@ -125,5 +125,5 @@ workload_rules:
 
 # Fallback: direct DCGM exporter endpoints (used with --direct flag)
 dcgm_endpoints:
-  - url: "http://198.19.44.210:9400/metrics"
-    name: "8bitmumworker03"
+  - url: "${DCGM_EXPORTER_URL}"
+    name: "${DCGM_EXPORTER_NAME}"

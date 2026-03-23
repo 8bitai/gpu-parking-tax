@@ -9,5 +9,9 @@ venv/
 figures/*.png
 figures/*.pdf
 *.log
-
 .DS_Store
+
+# Dashboard
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
