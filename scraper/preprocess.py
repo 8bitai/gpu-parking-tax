@@ -276,7 +276,7 @@ def compute_quantiles_by_workload(df: pd.DataFrame) -> pd.DataFrame:
 
 def main():
     parser = argparse.ArgumentParser(description="Preprocess raw telemetry CSVs")
-    parser.add_argument("--raw-dir", default="../data/raw", help="Raw CSV directory")
+    parser.add_argument("--raw-dir", default="../data/telemetry", help="Raw CSV directory")
     parser.add_argument("--output-dir", default="../data/processed", help="Output directory")
     parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")

@@ -1,17 +1,22 @@
-data/raw/
+# Data
+data/telemetry/
 data/processed/
+
+# Python
 __pycache__/
 *.pyc
-.env
 *.egg-info/
 .venv/
 venv/
-figures/*.png
-figures/*.pdf
-*.log
+
+# Environment
+.env
+
+# OS
 .DS_Store
 
-# Dashboard
-dashboard/node_modules/
-dashboard/.next/
-dashboard/out/
+# Logs
+*.log
+
+# Generated figures (paper figures are in paper/)
+figures/

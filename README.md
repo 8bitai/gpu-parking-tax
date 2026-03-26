@@ -1,158 +1,126 @@
-# GPU Behavioral Profiling
+# The Model Parking Tax
 
-Workload-stratified GPU telemetry analysis — scraping, preprocessing, and interactive EDA dashboard for DCGM metrics across multi-node GPU clusters.
+Companion repository for *"The Model Parking Tax: Quantifying the Hidden Energy Cost of Always-On GPU Model Deployment"*.
 
-## What This Does
+## Overview
 
-Collects 41 DCGM telemetry metrics from GPU clusters, classifies active workloads by Kubernetes pod metadata, and serves an 8-page interactive dashboard for exploratory data analysis. Designed for understanding GPU behavior patterns before building ML models (anomaly detection, workload fingerprinting).
+This paper presents the first cross-architecture measurement of idle GPU power as a function of VRAM allocation. We combine 18 days of production telemetry (335,267 samples, 14 H100 GPUs) with controlled dose-response experiments on three GPU architectures: NVIDIA H100 (HBM3), A100 (HBM2e), and L40S (GDDR6).
 
-### Key Capabilities
+**Key finding:** Idle GPU power is *piecewise constant* across all three architectures. The CUDA context forces a discrete DVFS transition (+26--66 W), while the marginal VRAM effect is bounded below measurement relevance (|beta| < 0.02 W/GB). The CUDA context accounts for >98% of the parking tax regardless of memory technology.
 
-- **Workload classification** — Automatic labeling of GPU activity by workload type (LLM inference, embedding, voice AI, computer vision) based on K8s container/pod patterns
-- **Derived features** — 7 computed metrics: tensor dominance, FP16/FP32 ratio, compute-memory ratio, clock throttling, thermal headroom, power efficiency, memory utilization
-- **Pre-aggregated analytics** — Hourly rollups, per-workload statistics, correlation matrices, quantile tables
-- **Interactive EDA dashboard** — 8 pages of Plotly charts with dark mode, workload-colored visualizations, and metric selectors
-
-## Architecture
+## Repository Structure
 
 ```
-Prometheus/DCGM Exporter
-        |
-   scraper/ ──→ data/raw/ (daily CSVs)
-        |
-  preprocess.py ──→ data/processed/ (5 Parquet files)
-        |
-     api/ (FastAPI) ──→ dashboard/ (Next.js + Plotly)
+paper/                                  LaTeX source and figures
+  parking_tax.tex                       Main paper
+  cross_architecture_dose_response.png  Figure 1: three GPUs, dose-response curves
+  parking_tax_decomposition.png         Figure 2: base/context/VRAM bar chart
+  vram_regression_detail.png            Figure 3: zoomed regression per GPU
+
+scraper/                                Phase 1: production telemetry collection
+  scrape.py                             DCGM metric collection daemon (Prometheus)
+  preprocess.py                         Raw CSV to Parquet pipeline
+  workload_classifier.py                K8s metadata to workload labels
+  config.yaml                           Metric definitions and classification rules
+  validate.py                           Data validation checks
+  quick_test.py                         Scraper connectivity test
+
+experiments/                            Phase 2: controlled experiments
+  dose_response.py                      VRAM dose-response (auto-detects GPU arch)
+  model_validation.py                   Real model validation (Qwen2.5-7B on all GPUs)
+  scheduler_simulation.py               Breakeven scheduler simulation (Section 6)
+
+analysis/                               Analysis and figure generation
+  phase1_telemetry.py                   Phase 1 production telemetry analysis
+  phase2_controlled.py                  Phase 2 controlled experiment analysis
+  generate_paper_figures.py             Generate all three paper figures
+  supplementary_figures.py              Phase 1 supplementary figures
+  sensitivity_analysis.py               Industry-scale sensitivity analysis
+  results/                              Precomputed results (JSON, CSV)
+
+data/
+  telemetry/                            Phase 1 raw CSVs (not included, see below)
+  experiments/                          Phase 2 experiment data
+    h100_dose_response.jsonl            H100 canonical run (paper)
+    a100_dose_response.jsonl            A100 canonical run (paper)
+    l40s_dose_response.jsonl            L40S canonical run (paper)
+    h100_quick_test.jsonl               H100 quick validation
+    a100_exploratory.jsonl              A100 earlier run
+    l40s_exploratory.jsonl              L40S earlier run
+    h100_model_validation.jsonl         Qwen2.5-7B idle power validation
+    h100_cold_start_traces.jsonl        Cold-start power traces (1 Hz)
+    h100_validation_manifest.json       Validation experiment metadata
 ```
 
-**Why this stack?**
-- **FastAPI + PyArrow**: Multi-GB Parquet files need predicate pushdown. Python handles this natively.
-- **Plotly**: Only charting lib with native violin plots, heatmaps, radar charts, and 3D scatter — all needed for EDA.
-- **Pre-aggregation**: Most endpoints serve from pre-computed Parquets (<100ms). Distribution/scatter endpoints downsample to max 5K points.
-
-## Project Structure
-
-```
-├── scraper/
-│   ├── scrape.py              # DCGM metric collection daemon
-│   ├── preprocess.py          # CSV → Parquet pipeline + aggregations
-│   ├── workload_classifier.py # K8s metadata → workload labels
-│   └── config.yaml            # Metrics, labels, classification rules
-├── api/
-│   ├── main.py                # FastAPI app with CORS + lifespan
-│   ├── data_loader.py         # Parquet cache + numpy-safe serialization
-│   └── routers/               # 8 route modules (26 endpoints)
-├── dashboard/
-│   └── src/
-│       ├── app/               # 8 Next.js pages
-│       ├── components/        # PlotlyChart, Sidebar, Card, Providers
-│       └── lib/               # API client, zustand store, color config
-├── pyproject.toml
-└── .env.example
-```
-
-## Dashboard Pages
-
-| Page | What It Shows |
-|---|---|
-| **Overview** | KPIs, workload breakdown, utilization timeline (stacked area), GPU×Day heatmap |
-| **Workload Profiles** | Radar fingerprints, violin distributions, pipe breakdown, comparison table |
-| **GPU Health** | Per-GPU cards (util/temp/power), selectable metric heatmap, error summary |
-| **Temporal** | Diurnal heatmap (hour×workload), weekly patterns, rolling mean/std drift |
-| **Correlations** | Full correlation matrix, interactive X/Y scatter, top correlated pairs |
-| **Distributions** | Violin+box plots, overlaid histograms with bin slider, quantile table |
-| **Anomalies** | XID error timeline, violation stacked bars, ECC error trends |
-| **Profiling** | 2D PCA scatter (workload separability), explained variance, feature loadings |
-
-## Setup
+## Reproducing Results
 
 ### Prerequisites
 
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv) (Python package manager)
-- Node.js 18+ and [Bun](https://bun.sh/)
+- GPU access required only for running experiments (not for analysis)
 
-### Installation
+### Setup
 
 ```bash
-# Clone
-git clone <repo-url> && cd gpu-behavioral-profiling
-
-# Python dependencies
 uv sync
-
-# Dashboard dependencies
-cd dashboard && bun install && cd ..
-
-# Environment
-cp .env.example .env
-# Edit .env with your Prometheus/DCGM exporter URLs
+cp .env.example .env  # only needed for scraper
 ```
 
-### Running
+### Running Analysis
 
-**1. Collect data** (requires access to your Prometheus/DCGM endpoints):
+The analysis scripts operate on data in `data/experiments/` (Phase 2) and `analysis/results/` (precomputed Phase 1 results):
 
 ```bash
+# Regenerate all paper figures
+uv run python analysis/generate_paper_figures.py
+
+# Phase 2 analysis (controlled experiments)
+uv run python analysis/phase2_controlled.py
+
+# Sensitivity analysis (industry-scale estimates)
+uv run python analysis/sensitivity_analysis.py
+```
+
+### Running Experiments (requires GPU access)
+
+The dose-response script auto-detects GPU architecture and selects appropriate VRAM levels:
+
+```bash
+# Quick test (~45 min, 5 VRAM levels)
+uv run python experiments/dose_response.py --gpu 0 --quick
+
+# Full experiment (~3.5 hours, 8+ VRAM levels, 20 min per phase)
+uv run python experiments/dose_response.py --gpu 0
+
+# Custom VRAM levels
+uv run python experiments/dose_response.py --gpu 0 --levels 0,8,32,64
+```
+
+Real model validation:
+
+```bash
+uv run python experiments/model_validation.py --gpu 0
+```
+
+Scheduler simulation (no GPU needed):
+
+```bash
+uv run python experiments/scheduler_simulation.py
+```
+
+### Collecting Telemetry (requires Prometheus/DCGM infrastructure)
+
+```bash
+# Edit .env with your Prometheus/DCGM endpoints
 uv run python scraper/scrape.py --daemon
-```
-
-**2. Preprocess** (generates Parquet files from raw CSVs):
-
-```bash
 uv run python scraper/preprocess.py
 ```
 
-This produces 5 files in `data/processed/`:
+## Phase 1 Telemetry Data
 
-| File | Contents |
-|---|---|
-| `telemetry_wide.parquet` | Full wide-format data (one row per timestamp×GPU) |
-| `hourly_agg.parquet` | Hourly means by workload/host/GPU |
-| `stats_by_workload.parquet` | Per-workload descriptive stats |
-| `correlation_matrix.parquet` | Pearson correlations of all numeric metrics |
-| `quantiles_by_workload.parquet` | p1/p5/p25/p50/p75/p95/p99 per workload per metric |
-
-**3. Start the API**:
-
-```bash
-uv run uvicorn api.main:app --reload
-# Swagger docs at http://localhost:8000/docs
-```
-
-**4. Start the dashboard**:
-
-```bash
-cd dashboard && bun dev
-# Opens at http://localhost:3000
-```
-
-## API Endpoints
-
-26 endpoints across 8 route groups:
-
-- `/api/overview/` — summary, KPIs, utilization timeline, GPU heatmap
-- `/api/workloads/` — profiles, distributions, comparison, pipe breakdown
-- `/api/gpus/` — inventory, health summary, selectable heatmap
-- `/api/temporal/` — diurnal, weekly, drift detection
-- `/api/correlations/` — matrix, scatter, top pairs
-- `/api/distributions/` — violin, histogram, quantiles, metric list
-- `/api/anomalies/` — XID events, violations, ECC trends
-- `/api/profiling/` — PCA scatter, fingerprints
-
-## DCGM Metrics Collected
-
-41 metrics across 7 categories: performance/utilization, profiling (pipe activity), thermal/power, reliability/ECC, violations/throttling, interconnect (NVLink), and licensing. See `scraper/config.yaml` for the full list.
-
-## Configuration
-
-All sensitive configuration is in `.env`. See `.env.example` for required variables:
-
-- `PROMETHEUS_URL` — Prometheus server for range queries
-- `DCGM_EXPORTER_URL` — Direct DCGM exporter endpoint (fallback)
-- `CORS_ORIGINS` — Allowed origins for the API
-- `NEXT_PUBLIC_API_URL` — API base URL for the dashboard
+The raw Phase 1 telemetry (18 days, 335,267 idle samples from 14 H100 GPUs) totals ~6.8 GB of daily CSV files and is not included in this repository. The precomputed Phase 1 results in `analysis/results/phase1_results.json` contain all statistics reported in the paper. Contact the authors if you need access to the raw telemetry.
 
 ## License
 
-Private.
+MIT

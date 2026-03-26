@@ -1,0 +1,45 @@
+{
+  "experiment": "real_model_validation",
+  "start_time": "2026-03-25T08:53:32.260098+00:00",
+  "gpu_id": 0,
+  "gpu_info": {
+    "timestamp": "2026-03-25T08:53:32.259881+00:00",
+    "gpu_name": "NVIDIA H100 80GB HBM3",
+    "mem_total_mb": 81559.0,
+    "mem_used_mb": 1.0,
+    "mem_free_mb": 80995.0,
+    "power_w": 70.72,
+    "power_limit_w": 700.0,
+    "gpu_temp_c": 36.0,
+    "mem_temp_c": 44.0,
+    "sm_clock_mhz": 345.0,
+    "mem_clock_mhz": 2619.0,
+    "uuid": "GPU-anon-0004-0000-0000-000000000000",
+    "gpu_util_pct": 0.0,
+    "mem_util_pct": 0.0
+  },
+  "models": [
+    "Qwen/Qwen2.5-7B",
+    "Qwen/Qwen2.5-14B",
+    "Qwen/Qwen2.5-32B"
+  ],
+  "idle_duration_s": 900,
+  "sample_interval_s": 30,
+  "phases": [
+    {
+      "phase": "bare_idle",
+      "samples": 20
+    },
+    {
+      "model": "Qwen/Qwen2.5-7B",
+      "short_name": "qwen-7b",
+      "precision": "float16",
+      "load_time_s": 29.745849297381938,
+      "actual_vram_gb": 14.9208984375,
+      "idle_samples": 30,
+      "cold_start_samples": 37,
+      "cold_start_power_mean": 90.78567567567568,
+      "cold_start_power_peak": 124.08
+    }
+  ]
+}

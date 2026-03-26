@@ -1,0 +1,48 @@
+{
+  "base": {
+    "energy_gwh": 461.1264,
+    "carbon_kt": 179.839296,
+    "N_gpus": 3760000,
+    "rho": 0.65,
+    "P_park_w": 40,
+    "carbon_kg_per_kwh": 0.39
+  },
+  "N_gpus": {
+    "low_val": 2000000,
+    "high_val": 6000000,
+    "energy_low_gwh": 245.28,
+    "energy_high_gwh": 735.84,
+    "carbon_low_kt": 95.6592,
+    "carbon_high_kt": 286.9776
+  },
+  "rho": {
+    "low_val": 0.5,
+    "high_val": 0.8,
+    "energy_low_gwh": 658.752,
+    "energy_high_gwh": 263.50079999999997,
+    "carbon_low_kt": 256.91328,
+    "carbon_high_kt": 102.76531199999998
+  },
+  "P_park_w": {
+    "low_val": 26.3,
+    "high_val": 66.4,
+    "energy_low_gwh": 303.190608,
+    "energy_high_gwh": 765.4698240000001,
+    "carbon_low_kt": 118.24433712000001,
+    "carbon_high_kt": 298.53323136000006
+  },
+  "carbon_kg_per_kwh": {
+    "low_val": 0.05,
+    "high_val": 0.5,
+    "energy_low_gwh": 461.1264,
+    "energy_high_gwh": 461.1264,
+    "carbon_low_kt": 23.05632,
+    "carbon_high_kt": 230.5632
+  },
+  "combined": {
+    "energy_best_gwh": 92.15519999999998,
+    "energy_worst_gwh": 1744.9920000000002,
+    "carbon_best_kt": 4.607759999999999,
+    "carbon_worst_kt": 872.4960000000001
+  }
+}

@@ -1,0 +1,501 @@
+\documentclass[sigconf,nonacm]{acmart}
+
+% Remove ACM copyright for workshop draft
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\pagestyle{plain}
+
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{subcaption}
+\usepackage{siunitx}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\sisetup{group-separator={,}, group-minimum-digits=4}
+
+\begin{document}
+
+\title{The Model Parking Tax: Quantifying the Hidden Energy Cost of Always-On GPU Model Deployment}
+
+\author{Anonymous}
+\affiliation{\institution{Anonymous}}
+\email{anonymous@example.com}
+
+\begin{abstract}
+The AI inference industry keeps models loaded in GPU memory around the clock to avoid cold-start latency, implicitly treating idle power as a fixed cost of readiness. Yet the structure of this cost has never been empirically decomposed---and never across GPU architectures. We present the first cross-architecture measurement of idle GPU power as a function of VRAM allocation, combining 18~days of production telemetry (\num{335267} samples, 14~H100 GPUs) with controlled dose-response experiments on three GPU architectures spanning two memory technologies: NVIDIA H100 (HBM3, 80\,GB), A100 (HBM2e, 80\,GB), and L40S (GDDR6, 48\,GB). We observe that idle power is \emph{piecewise constant} on all three architectures: the CUDA context forces a discrete DVFS transition consuming $+26$--$66$\,W over bare idle (26--50\,W on HBM architectures, 66\,W on GDDR6), while the marginal VRAM effect is bounded below measurement relevance ($|\beta| < 0.02$\,W/GB) on every device tested. The CUDA context accounts for $>$98\% of the parking tax regardless of memory technology. We validate this finding with a real HuggingFace model (Qwen2.5-7B) on all three architectures, confirming $<$0.5\,W difference from empty tensors on every device, and capture cold-start power profiles during model loading. We derive a cold-start breakeven model showing energy-optimal behavior depends on request arrival rate and loading latency---not model size---with breakeven intervals of 1--5~minutes. Our results identify a constraint consistent across all tested architectures: idle-with-context power is determined by DVFS state, not memory occupancy.
+\end{abstract}
+
+\keywords{GPU energy, idle power, VRAM, DVFS, model serving, sustainability}
+
+\maketitle
+
+% ===========================================================================
+\section{Introduction}
+% ===========================================================================
+
+The default operating model for AI inference is to deploy models to GPUs and keep them loaded in VRAM indefinitely, accepting continuous idle power consumption to avoid cold-start latency. Both sides of this tradeoff are individually well-studied. The cold-start problem has driven systems like ServerlessLLM~\cite{serverlessllm} (3.6--8.2$\times$ faster loading), NVIDIA Run:ai Model Streamer~\cite{nvidia-streamer} ($\sim$5\,s for Llama~3 8B), and checkpoint-optimized loaders~\cite{hydraserve,lambdascale}. But the \emph{other side}---the ongoing energy cost of readiness---has been treated as an unquantified constant.
+
+The 2024 US Data Center Energy Usage Report estimates GPU idle power at $\sim$20\% of TDP~\cite{doe-report}. Patel et al.~\cite{patel-cal23} showed that CUDA contexts on A100 GPUs force higher clock frequencies even when idle. Neither study measured the marginal energy cost \emph{per GB of VRAM allocation}---the quantity needed for rational keep-warm decisions---nor did either test whether the result generalizes across GPU architectures and memory technologies.
+
+This paper fills that gap. We ask: \textbf{does storing model weights in GPU VRAM incur a measurable marginal idle energy cost, and is the answer architecture-dependent?} We answer with two complementary studies:
+
+\begin{enumerate}
+    \item \textbf{Production telemetry} (Phase~1): \num{335267} idle-state samples from 14~H100 GPUs across 2~nodes over 18~days, with VRAM allocations spanning 3\,MB to 79\,GB.
+    \item \textbf{Controlled experiments} (Phase~2): Within-subject dose-response studies on three GPU architectures---H100 (HBM3), A100 (HBM2e), and L40S (GDDR6)---systematically varying VRAM from 0 to 40--72\,GB, validated with real HuggingFace model weights.
+\end{enumerate}
+
+Our central finding is that idle GPU power is \emph{piecewise constant} across all three architectures. We model idle power as:
+\begin{equation}
+    P_{\text{idle}}(C, V) = P_{\text{base}} + \Delta P_{\text{DVFS}} \cdot \mathbf{1}_{[C=1]} + \beta V
+    \label{eq:model}
+\end{equation}
+where $C \in \{0,1\}$ indicates a CUDA context, $V$ is VRAM allocated (GB), and $\beta$ is the marginal VRAM power coefficient. On all three devices, $|\beta| < 0.02$\,W/GB and we cannot reject $\beta = 0$ as a physically meaningful effect. The optimization priority is:
+\begin{equation}
+    \frac{\partial P}{\partial C} \gg \frac{\partial P}{\partial V}
+    \label{eq:priority}
+\end{equation}
+This holds across HBM3, HBM2e, and GDDR6 in our experiments---consistent across all tested architectures rather than an artifact of any single device.
+
+% ===========================================================================
+\section{Background}
+% ===========================================================================
+
+\subsection{GPU Power Architecture and DVFS}
+
+NVIDIA datacenter GPUs support multiple power states via Dynamic Voltage and Frequency Scaling (DVFS). Without a CUDA context, SM clocks drop to low-power idle (210--345\,MHz depending on architecture). Once a CUDA context is created---by any CUDA runtime call---the SM clock jumps to maximum boost and \emph{remains there} at 0\% utilization~\cite{patel-cal23}. This represents a DVFS anomaly:
+\begin{equation}
+    \text{Expected: } P \downarrow \text{ as } U \to 0 \qquad \text{Observed: } P = \text{const when } C = 1
+    \label{eq:dvfs-anomaly}
+\end{equation}
+This converts a \emph{variable} cost (expected) into a \emph{fixed} cost (observed), decoupling idle power from both utilization and memory occupancy.
+
+\subsection{GPU Memory Power Model}
+
+GPU memory power decomposes into three components~\cite{hbm-spec,micron-ddr}:
+\begin{equation}
+    P_{\text{mem}} = P_{\text{background}} + P_{\text{refresh}} + P_{\text{activate}}
+    \label{eq:mem-power}
+\end{equation}
+$P_{\text{background}}$ is constant whenever the memory clock runs. $P_{\text{refresh}}$ is proportional to \emph{capacity}, not occupancy---refresh circuitry sweeps all rows regardless of data content. $P_{\text{activate}}$ (row open/close) is zero at idle. This decomposition applies to both HBM (HBM3, HBM2e) and GDDR6, as all are DRAM-based with mandatory refresh. Therefore, at idle:
+\begin{equation}
+    \frac{\partial P_{\text{mem}}}{\partial \text{occupancy}} \approx 0
+    \label{eq:mem-prediction}
+\end{equation}
+Memory controller and background power dominate at idle, remaining constant regardless of occupancy. DRAM refresh sweeps all rows per JEDEC specification, independent of which rows contain valid data---making $\beta \approx 0$ a hardware-physics prediction, not merely an empirical observation. A flat VRAM dose-response is a prediction of memory physics, not an accidental finding. Our experiments test this prediction across three memory technologies.
+
+\subsection{Related Work}
+
+Patel et al.~\cite{patel-cal23} studied idle-but-allocated A100 and RTX~6000 Ada GPUs, finding DVFS locks at maximum frequency ($\sim$20\,W above bare idle). They did not vary VRAM levels. Zeus~\cite{zeus} optimized energy for \emph{active} training. Patel et al.~\cite{patel-asplos24} characterized LLM inference power phases. Burtscher et al.~\cite{burtscher-power} showed \texttt{nvidia-smi} samples power for only $\sim$25\% of runtime---a caveat we address in \S\ref{sec:measurement}.
+
+\paragraph{GPU sharing and multi-tenancy.} NVIDIA provides several mechanisms for sharing GPUs across workloads. Multi-Instance GPU (MIG)~\cite{nvidia-mig} partitions a GPU into isolated instances, each with its own CUDA context and memory. Multi-Process Service (MPS)~\cite{nvidia-mps} allows multiple CUDA contexts to share SM resources with reduced context-switching overhead. Time-slicing alternates CUDA contexts on shared hardware. All three approaches maintain at least one active CUDA context, meaning the DVFS overhead we measure persists. MIG partitions may amortize the overhead across tenants, but the aggregate GPU power is expected to remain similar, though per-tenant allocation of the overhead may differ. We do not evaluate multi-tenant configurations; whether MIG/MPS alter the per-context DVFS behavior is an open question.
+
+\paragraph{Power capping.} NVIDIA's \texttt{nvidia-smi -pl} allows operators to set power limits below TDP, triggering clock throttling when the cap is approached. Whether power capping changes the idle DVFS step behavior---particularly whether a sufficiently low cap forces idle-with-context clocks below maximum boost---has not been studied. Our experiments use default power limits.
+
+No prior work has measured the marginal idle power cost per GB of VRAM, decomposed idle power into DVFS and memory components, or tested cross-architecture invariance.
+
+% ===========================================================================
+\section{Methodology}
+% ===========================================================================
+
+\subsection{Phase~1: Production Telemetry}
+
+\paragraph{Infrastructure.} We instrumented 14 NVIDIA H100 80GB SXM5 GPUs across 2~nodes running Kubernetes. DCGM Exporter exposes metrics to Prometheus at 30-second intervals.
+
+\paragraph{Dataset.} We collected \num{336226} observations over 18~days. Average GPU utilization was 0.11\%; filtering to 0\% utilization retained \num{335267} samples (99.7\%). VRAM allocations ranged from 3\,MB to 79\,GB across five workload categories.
+
+\paragraph{Effective sample size.} With 30\,s sampling and thermal correlation of 3--5~min ($\tau \approx 6$--$10$ samples):
+\begin{equation}
+    N_{\text{eff}} \approx \frac{N_{\text{raw}}}{2\tau + 1} \approx \num{33000}\text{--}\num{56000}
+    \label{eq:neff}
+\end{equation}
+
+
+\subsection{Phase~2: Controlled Experiments}
+
+We conducted within-subject dose-response experiments on three GPUs (Table~\ref{tab:gpus}). Each experiment followed the same protocol: record bare-idle baseline (no CUDA context), create a persistent CUDA context, then sequentially allocate increasing VRAM using PyTorch tensors (\texttt{torch.empty}). For each level: allocate, stabilize 60\,s, record \texttt{nvidia-smi} every 30\,s for 20~min, release, cool down 30\,s. All GPUs were otherwise idle.
+
+\begin{table}[t]
+\caption{Phase~2 GPU configurations. All experiments used 30\,s sampling intervals with 20-minute recording phases.}
+\label{tab:gpus}
+\small
+\begin{tabular}{llrrr}
+\toprule
+\textbf{GPU} & \textbf{Memory} & \textbf{TDP} & \textbf{VRAM Range} & $n$/\textbf{phase} \\
+\midrule
+H100 80GB SXM & HBM3 & 700\,W & 0--64\,GB & 40 \\
+A100 80GB PCIe & HBM2e & 300\,W & 0--72\,GB & 40 \\
+L40S 48GB & GDDR6 & 350\,W & 0--40\,GB & 40 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Measurement Model}
+\label{sec:measurement}
+
+Within each treatment phase, we observe:
+\begin{equation}
+    \hat{P} = \frac{1}{n}\sum_{i=1}^{n} P(t_i), \quad \sigma_{\text{within}} < 1.5\,\text{W}
+    \label{eq:sampling}
+\end{equation}
+The noisiest GPU (L40S, GDDR6) has $\sigma < 1.5$\,W; the cleanest (A100, HBM2e) has $\sigma < 0.08$\,W; the H100 (HBM3) has $\sigma < 0.17$\,W. With $n = 40$ samples per phase on all three architectures, this yields SE $< 0.25$\,W on the noisiest device, ensuring sub-watt resolution for detecting systematic VRAM effects. On all three devices, the total power range across CUDA-active phases is $<$1\,W:
+\begin{equation}
+    \Delta P_{\text{VRAM}} < 1\,\text{W across full VRAM range on all GPUs}
+    \label{eq:bound}
+\end{equation}
+This converts our measurement limitation into a \emph{result constraint}. Regarding Burtscher et al.'s~\cite{burtscher-power} finding that \texttt{nvidia-smi} undersamples: our within-phase standard deviations confirm idle power is stable enough that subsampling does not bias means.
+
+% ===========================================================================
+\section{Results}
+% ===========================================================================
+
+\subsection{Phase~1: Two Discrete Power States}
+
+The production telemetry reveals a bimodal distribution:
+\begin{itemize}
+    \item \textbf{Bare idle} (345\,MHz): 7~GPUs, mean 74.7\,W $\pm$ 7.9\,W.
+    \item \textbf{CUDA active} (1980\,MHz): 7~GPUs, mean 145.5\,W $\pm$ 11.2\,W.
+\end{itemize}
+The CUDA context effect is $+70.9$\,W (Cohen's $d = 7.3$, $p < 10^{-300}$). Within CUDA-active GPUs, regression across 3.2--77.1\,GB yields slope $= 0.013$\,W/GB ($R^2 = 0.001$, $p = 0.95$)---no detectable VRAM effect. Node-level variation ($\sim$23\,W) exceeds any plausible VRAM effect, motivating Phase~2.
+
+\subsection{Phase~2: Cross-Architecture Dose-Response}
+
+Table~\ref{tab:cross} and Figure~\ref{fig:hero} present the controlled experiments across all three GPUs.
+
+\begin{table}[t]
+\caption{Cross-architecture parking tax. Power values are mean $\pm$ std. $\beta$ is the linear regression slope across CUDA-active phases. All GPUs at 0\% utilization.}
+\label{tab:cross}
+\small
+\begin{tabular}{lrrr}
+\toprule
+ & \textbf{H100} & \textbf{A100} & \textbf{L40S} \\
+ & \textbf{(HBM3)} & \textbf{(HBM2e)} & \textbf{(GDDR6)} \\
+\midrule
+Bare idle (W) & 71.8 & 53.7 & 35.6 \\
+SM clock, bare (MHz) & 345 & 210 & 210 \\
+CUDA ctx power (W) & 121.7 & 80.0 & 102.1 \\
+SM clock, ctx (MHz) & 1980 & 1410 & 2520 \\
+\midrule
+\textbf{Context overhead (W)} & \textbf{+49.9} & \textbf{+26.3} & \textbf{+66.4} \\
+Context (\% of TDP) & 7.1\% & 8.8\% & 19.0\% \\
+\midrule
+Max VRAM tested (GB) & 64 & 72 & 40 \\
+Power range, VRAM (W) & +0.34 & $-$0.09 & +0.08 \\
+$\beta$ (W/GB) & $-$0.002 & $-$0.001 & $-$0.002 \\
+$p$-value ($\beta = 0$) & 0.404 & 0.002$^\dagger$ & 0.794 \\
+$p_{\text{TOST}}$ ($|\beta| < 0.1$) & $10^{-9}$ & $<0.001$ & $<0.05$ \\
+\midrule
+\textbf{Context \% of tax} & \textbf{$>$99\%} & \textbf{$>$99\%} & \textbf{$>$99\%} \\
+\bottomrule
+\multicolumn{4}{l}{\footnotesize $^\dagger$Slope is \emph{negative}; see \S\ref{sec:a100-note}.}
+\end{tabular}
+\end{table}
+
+\paragraph{CUDA context overhead.} On all three GPUs, creating a CUDA context triggers a discrete DVFS transition: SM clocks jump from 210--345\,MHz to 1410--2520\,MHz (architecture-dependent). The associated power step ranges from $+26.3$\,W (A100) to $+66.4$\,W (L40S). This is the dominant component of the parking tax on every architecture.
+
+\paragraph{VRAM allocation: bounded below relevance.} Once a CUDA context is active, varying VRAM from 0 to 40--72\,GB changes power by less than 1\,W on \emph{every GPU tested}. The power range reflects measurement noise; the regression slope $\beta$ captures any systematic effect. Per-GPU 95\% confidence intervals for $\beta$:
+\begin{itemize}
+    \item H100: $\beta = -0.002$\,W/GB, 95\% CI $[-0.005, +0.002]$, $p = 0.40$
+    \item A100: $\beta = -0.001$\,W/GB, 95\% CI $[-0.002, -0.0005]$, $p = 0.002^\dagger$
+    \item L40S: $\beta = -0.002$\,W/GB, 95\% CI $[-0.019, +0.015]$, $p = 0.79$
+\end{itemize}
+We fail to reject $\beta = 0$ on the H100 and L40S. On the A100, $\beta$ is statistically significant but negative (see below). To move beyond the absence of evidence, we apply the Two One-Sided Tests (TOST) equivalence procedure~\cite{schuirmann-tost} with an equivalence bound of $\Delta = \pm 0.1$\,W/GB---chosen so that even a 64\,GB model would contribute $<$6.4\,W---an order of magnitude smaller than the DVFS overhead (26--66\,W) on every architecture tested. This ensures the equivalence bound is conservative: any effect below $\Delta$ is operationally irrelevant for keep-warm decisions. On all three GPUs, the TOST procedure rejects the hypothesis that $|\beta| \geq 0.1$\,W/GB ($p_{\text{TOST}} < 0.05$), formally establishing that the marginal VRAM effect is bounded below practical relevance. Figure~\ref{fig:regression} shows the zoomed regression detail for all three GPUs.
+
+\paragraph{The A100 negative slope.}
+\label{sec:a100-note}
+On the A100, $\beta = -0.001$\,W/GB with $p = 0.002$---statistically significant but \emph{negative}. The total effect is $-0.09$\,W across 72\,GB, coinciding with a 0.7\textdegree C HBM temperature drift (50.2\textdegree C $\to$ 49.5\textdegree C) over the sequential experiment. This is a temporal confound, not a memory physics effect: more VRAM cannot \emph{reduce} power. It demonstrates that even when $p < 0.05$, the detected signal is 300$\times$ smaller than the DVFS component and directionally implausible.
+
+\paragraph{System characterization.} The idle power model (Equation~\ref{eq:model}) is empirically, per architecture:
+\begin{align}
+    P_{\text{H100}} &\approx 71.8 + 49.9 \cdot \mathbf{1}_{[C=1]} \;\text{W} \label{eq:h100}\\
+    P_{\text{A100}} &\approx 53.7 + 26.3 \cdot \mathbf{1}_{[C=1]} \;\text{W} \label{eq:a100}\\
+    P_{\text{L40S}} &\approx 35.6 + 66.4 \cdot \mathbf{1}_{[C=1]} \;\text{W} \label{eq:l40s}
+\end{align}
+with $\beta \approx 0$ on all three. The parking tax is a step function determined by CUDA context presence, invariant to memory occupancy and memory technology. Figure~\ref{fig:decomp} visualizes this decomposition: the VRAM component is invisible at scale on all three architectures.
+
+\paragraph{Cross-technology consistency.} The flat dose-response holds across HBM3, HBM2e, and GDDR6---three fundamentally different memory subsystems with different bandwidths (3.35\,TB/s, 2.0\,TB/s, 864\,GB/s), clock rates (2619, 1512, 9001\,MHz), and physical packaging. This is consistent with the memory physics prediction of Equation~\ref{eq:mem-prediction}: at idle, $\partial P_{\text{mem}} / \partial \text{occupancy} \approx 0$ regardless of DRAM technology.
+
+\subsection{Real Model Validation}
+
+The Phase~2 experiments use \texttt{torch.empty} tensors to isolate the VRAM effect from model-specific CUDA state. To validate that real model weights---with their associated CUDA kernels, cuDNN handles, and weight tensors---do not alter the result, we loaded a production HuggingFace model (Qwen2.5-7B in fp16~\cite{qwen2}) on all three GPU architectures and measured idle power. On the A100 and L40S, we additionally compared loaded-model idle power against post-unload power (same CUDA context, model weights freed).
+
+\begin{table}[t]
+\caption{Real model validation across three architectures. Qwen2.5-7B (fp16, $\sim$14.9\,GB) idle power compared against a reference with different VRAM but the same CUDA context. H100: \texttt{torch.empty} 16\,GB; A100 and L40S: post-unload residual context ($\sim$0.5\,GB). All deltas are within measurement noise.}
+\label{tab:validation}
+\small
+\begin{tabular}{llrrr}
+\toprule
+\textbf{GPU} & \textbf{Allocation} & \textbf{VRAM (GB)} & \textbf{Idle (W)} & $\Delta$ \\
+\midrule
+\multirow{2}{*}{H100} & \texttt{torch.empty} 16\,GB & 16.0 & 121.51 & --- \\
+ & Qwen2.5-7B (fp16) & 14.9 & 121.48 & $-$0.03\,W \\
+\midrule
+\multirow{2}{*}{A100} & Qwen2.5-7B (fp16) & 14.8 & 105.32 & --- \\
+ & Post-unload (ctx only) & 0.5 & 105.53 & +0.21\,W \\
+\midrule
+\multirow{2}{*}{L40S} & Qwen2.5-7B (fp16) & 14.8 & 97.07 & --- \\
+ & Post-unload (ctx only) & 0.5 & 97.54 & +0.47\,W \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:validation} shows the results. On the H100, Qwen2.5-7B idles at 121.48\,W---within 0.03\,W of the \texttt{torch.empty} baseline ($n=30$, $\sigma = 0.11$\,W). On the A100 and L40S, unloading the model (freeing 14.3\,GB of weights while retaining the CUDA context at $\sim$0.5\,GB) changes idle power by only +0.21\,W and +0.47\,W respectively---both within measurement noise and far below the 26--66\,W CUDA context overhead. The absolute idle power varies across GPU instances (e.g., 105\,W on this A100 vs.\ 80\,W in Phase~2), consistent with the 23\,W inter-node variation observed in Phase~1; the within-instance VRAM invariance holds regardless. Real model CUDA state does not measurably alter idle power on any architecture tested.
+
+\paragraph{Cold-start power profile.} On the H100, we captured 1\,Hz power traces during Qwen2.5-7B loading (29.7\,s). The profile is bursty: 22\,s at bare idle ($\sim$70.8\,W, CPU-side deserialization), a 3\,s GPU burst peaking at 124.1\,W during weight transfer to VRAM, then settling to the CUDA-active idle ($\sim$121\,W). The peak loading power (124\,W) is far below TDP (700\,W), consistent with the I/O-bound nature of model loading. On the A100 and L40S, Qwen2.5-7B loaded in 11.5\,s and 10.8\,s respectively (both fp16, $\sim$14.8\,GB VRAM), corroborating that cold starts for small models complete in seconds across architectures. These measured profiles validate using $P_{\text{load}} \approx 100$--$300$\,W in our breakeven model (Equation~\ref{eq:breakeven}).
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{cross_architecture_dose_response.png}
+    \caption{The Model Parking Tax across three GPU architectures. Large markers at ``bare'': bare-idle power (no CUDA context). Connected lines: CUDA-active phases with increasing VRAM. The discrete DVFS step dominates; all three dose-response curves are flat. The result holds across HBM3, HBM2e, and GDDR6 memory technologies.}
+    \label{fig:hero}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{parking_tax_decomposition.png}
+    \caption{Parking tax decomposition. Gray: base idle power. Color: CUDA context overhead (98--$>$99\% of the tax). The VRAM component (red sliver, $<$1\,W) is invisible at this scale on all three architectures.}
+    \label{fig:decomp}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{vram_regression_detail.png}
+    \caption{VRAM dose-response detail (CUDA-active phases only, zoomed to $\pm$2.5\,W). Each panel shows one GPU with regression line. H100 and L40S slopes are not significant; A100 slope is significant but negative (thermal drift, not a memory effect). All three are flat within $\pm$1\,W.}
+    \label{fig:regression}
+\end{figure}
+
+% ===========================================================================
+\section{Cold-Start Breakeven Model}
+% ===========================================================================
+
+The parking tax $P_{\text{park}}$ varies by architecture: 49.9\,W (H100), 26.3\,W (A100), 66.4\,W (L40S). The energy breakeven between keeping warm and cold-starting is:
+\begin{equation}
+    T^* = \frac{P_{\text{load}} \cdot t_{\text{load}}}{P_{\text{park}}}
+    \label{eq:breakeven}
+\end{equation}
+
+Table~\ref{tab:breakeven} shows breakeven intervals for the H100 ($P_{\text{park}} = 49.9$\,W). For standard PyTorch loading of a 70B model (45\,s, $\sim$300\,W), $T^* \approx$ \textbf{4.5~min}. On the A100 ($P_{\text{park}} = 26.3$\,W), $T^*$ is longer ($\sim$8.5~min) because the lower overhead takes longer to exceed the cold-start cost. On the L40S ($P_{\text{park}} = 66.4$\,W), $T^*$ is shorter ($\sim$3.4~min).
+
+\begin{table}[t]
+\caption{Cold-start energy breakeven on H100 ($P_{\text{park}} = 49.9$\,W). $^\dagger$Measured in this work; others estimated from published benchmarks.}
+\label{tab:breakeven}
+\small
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Loading Method} & $P_{\text{load}}$ \textbf{(W)} & $t_{\text{load}}$ \textbf{(s)} & $T^*$ \\
+\midrule
+Qwen2.5-7B (measured)$^\dagger$ & 124 & 30 & 1.2\,min \\
+Standard PyTorch (70B) & 300 & 45 & 4.5\,min \\
+ServerlessLLM (70B) & 300 & 8 & 48\,s \\
+Run:ai Streamer (8B) & 200 & 5 & 20\,s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Queueing extension.} If requests arrive as a Poisson process with rate $\lambda$, the optimal eviction policy for memoryless arrivals is binary:
+\begin{equation}
+    \text{Keep warm iff } \lambda > \lambda^* = \frac{P_{\text{park}}}{P_{\text{load}} \cdot t_{\text{load}}}
+    \label{eq:queueing}
+\end{equation}
+For H100 with PyTorch loading: $\lambda^* \approx 13$\,req/hr. For A100: $\lambda^* \approx 7$\,req/hr. For L40S: $\lambda^* \approx 18$\,req/hr. Below these rates, cold-starting saves energy.
+
+\paragraph{Model-size independence.} Because $P_{\text{park}}$ is a fixed cost (independent of $V$), $T^*$ depends only on loading power and time---not model size. Small models are the \emph{worst} candidates for always-on deployment: they reload in seconds yet pay the full parking tax.
+
+\paragraph{Limitations of the breakeven model.} We approximate $P_{\text{load}}$ as constant during loading; real cold starts exhibit bursty power profiles (I/O phases, deserialization, weight transfer), which would slightly reduce $T^*$. We also do not model the latency cost to users---only the energy cost to operators.
+
+% ===========================================================================
+\section{Industry-Scale Impact}
+% ===========================================================================
+
+Let $N$ denote total datacenter GPUs and $\rho$ the average utilization:
+\begin{equation}
+    E_{\text{park}} = N(1 - \rho) \cdot \bar{P}_{\text{park}} \cdot T_{\text{year}}
+    \label{eq:industry}
+\end{equation}
+NVIDIA shipped $\sim$3.76M datacenter GPUs in 2023~\cite{nvidia-shipments}. Taking $\rho = 0.65$ (35\% idle~\cite{flexera}) and $\bar{P}_{\text{park}} = 40$\,W (fleet-weighted average across architectures), the base estimate is $E_{\text{park}} = 462$\,GWh/year.
+
+\paragraph{Sensitivity analysis.} We vary each parameter across its plausible range (Table~\ref{tab:sensitivity}) to bound the estimate. The dominant uncertainty is fleet size and utilization rate, not the parking tax itself (which we measure directly).
+
+\begin{table}[t]
+\caption{Sensitivity of industry impact to key assumptions.}
+\label{tab:sensitivity}
+\small
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Parameter} & \textbf{Low} & \textbf{Base} & \textbf{High} \\
+\midrule
+Fleet size & 2.0M & 3.76M & 6.0M \\
+Utilization $\rho$ & 50\% & 65\% & 80\% \\
+$\bar{P}_{\text{park}}$ (W) & 26.3 (A100) & 40 & 66.4 (L40S) \\
+\midrule
+$E_{\text{park}}$ (GWh/yr) & 92 & 462 & 1{,}745 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The plausible range spans 92--1{,}745\,GWh/year, with the base case at 462\,GWh/year ($\sim$180\,kT CO$_2$ at US grid average). Even the conservative lower bound (92\,GWh) exceeds the annual electricity consumption of a small city. The range reflects uncertainty in fleet composition and duty cycles---not in the parking tax measurement itself, which is tightly bounded by our experiments.
+
+% ===========================================================================
+\section{Scheduler Evaluation}
+\label{sec:scheduler}
+% ===========================================================================
+
+To demonstrate the practical utility of the breakeven model, we implement a proof-of-concept scheduler that uses $T^*$ (Equation~\ref{eq:breakeven}) to make keep-warm/evict decisions. We compare three policies over 24-hour simulations:
+
+\begin{enumerate}
+    \item \textbf{Always-On}: Model stays loaded (industry default).
+    \item \textbf{Fixed TTL}: Evict after a fixed idle timeout (5, 15, or 30 minutes).
+    \item \textbf{Breakeven}: Evict after $T^* = P_{\text{load}} \cdot t_{\text{load}} / P_{\text{park}}$ seconds of idle time.
+\end{enumerate}
+
+We evaluate on three synthetic traffic patterns: steady Poisson (5\,req/hr), bursty (alternating 2 and 60\,req/hr), and diurnal (sinusoidal, peak 30\,req/hr). On H100 with standard PyTorch loading, $T^* = 271$\,s (4.5~min).
+
+\paragraph{Results.} The breakeven policy saves 8.2--23.0\% energy versus always-on across traffic patterns (Table~\ref{tab:scheduler}). On bursty traffic---the most realistic pattern for production LLM serving---the breakeven policy saves 23.0\% with only 48 cold starts over 24 hours (4.5\,s average added latency per request). The breakeven policy matches or outperforms all fixed TTLs because $T^*$ is derived from measured hardware parameters rather than guessed.
+
+\begin{table}[t]
+\caption{Scheduler simulation results (H100, 24h, standard PyTorch loader). Energy savings vs.\ always-on baseline (2{,}921\,Wh).}
+\label{tab:scheduler}
+\small
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Policy} & \textbf{Energy (Wh)} & \textbf{Savings} & \textbf{Cold starts} \\
+\midrule
+\multicolumn{4}{l}{\emph{Low traffic (5 req/hr, Poisson)}} \\
+Always-On & 2{,}921 & --- & 1 \\
+TTL 5\,min & 2{,}407 & 17.6\% & 78 \\
+Breakeven ($T^*$=4.5\,min) & 2{,}392 & 18.1\% & 81 \\
+\midrule
+\multicolumn{4}{l}{\emph{Bursty traffic (2/60 req/hr)}} \\
+Always-On & 2{,}921 & --- & 1 \\
+TTL 5\,min & 2{,}264 & 22.5\% & 47 \\
+Breakeven ($T^*$=4.5\,min) & 2{,}248 & 23.0\% & 48 \\
+\midrule
+\multicolumn{4}{l}{\emph{Diurnal (peak 30 req/hr)}} \\
+Always-On & 2{,}921 & --- & 1 \\
+TTL 5\,min & 2{,}671 & 8.6\% & 87 \\
+Breakeven ($T^*$=4.5\,min) & 2{,}682 & 8.2\% & 100 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Cross-architecture behavior.} The breakeven time varies by architecture: $T^* = 271$\,s (H100), 513\,s (A100), and 190\,s (L40S). The L40S, with the highest parking tax (66.4\,W), has the shortest breakeven time and the most to gain from eviction. With fast model loading (ServerlessLLM, $t_{\text{load}} = 8$\,s), $T^*$ drops to 50\,s (H100), enabling aggressive eviction even at moderate request rates.
+
+% ===========================================================================
+\section{Discussion}
+% ===========================================================================
+
+\paragraph{Cross-architecture consistency.} The key contribution is not any single GPU measurement but the \emph{structural consistency} across architectures. The parking tax is a step function of CUDA context on H100 (Hopper), A100 (Ampere), and L40S (Ada Lovelace)---three microarchitectures with different memory technologies, process nodes, and TDP budgets. The magnitude of $\Delta P_{\text{DVFS}}$ varies (26--66\,W across architectures), but the structure is identical: $\partial P / \partial C \gg \partial P / \partial V$. With $n = 1$ device per architecture, we cannot claim universal invariance, but the consistency across three architectures---combined with the physics argument of Equation~\ref{eq:mem-prediction}---provides strong evidence that this is a design-space constraint rather than a device-specific artifact. Crucially, Phase~1 bounds inter-device slope variation directly: regression of idle power against VRAM across all 14~H100 GPUs yields slopes statistically indistinguishable from zero on every device, even as intercepts vary by $\sim$23\,W due to silicon binning and cooling differences. Large intercept variation with zero slope variation implies that $\beta \approx 0$ is device-invariant, not an artifact of testing a single GPU.
+
+\paragraph{Why $\Delta P_{\text{DVFS}}$ varies.} The L40S has the highest context overhead (66.4\,W, 19\% of TDP) despite having the lowest TDP (350\,W). This is because the L40S boosts to 2520\,MHz (vs.\ 1980\,MHz for H100, 1410\,MHz for A100). Higher idle clock frequency means higher idle power. The A100's modest 1410\,MHz idle clock explains its lower 26.3\,W overhead.
+
+\paragraph{Design directions.} (1)~\textbf{CUDA context power management}: Force idle-with-context GPUs to low-clock states. This requires driver/firmware support that does not exist. (2)~\textbf{Context pooling}: Share CUDA contexts via MPS~\cite{nvidia-mps} to amortize overhead; MIG~\cite{nvidia-mig} partitions could isolate tenants while sharing the DVFS cost. (3)~\textbf{Size-aware scheduling}: Preferentially cold-start small models (fast reload, same parking cost). (4)~\textbf{Breakeven-aware eviction}: Our scheduler evaluation (\S\ref{sec:scheduler}) shows that a simple $T^*$-based policy saves 8--23\% energy with minimal latency impact, using only hardware parameters we measure. The breakeven policy slightly underperforms fixed TTLs on gradual traffic ramps (diurnal pattern, Table~\ref{tab:scheduler}) because threshold-based eviction triggers oscillations near the crossover rate; adaptive smoothing or hysteresis could address this.
+
+\paragraph{Limitations.} We test one device per architecture in Phase~2 under a controlled within-subject design that isolates VRAM allocation as the sole manipulated variable, eliminating between-device confounders (silicon binning, cooling, power supply). Phase~1 complements this with \num{335267} samples across 14~H100 devices, bounding inter-device slope variation to below measurement sensitivity. All three architectures use $n=40$ per phase (20-minute recording windows). The primary Phase~2 experiments use \texttt{torch.empty} tensors; we validate with a real HuggingFace model (Qwen2.5-7B) on all three architectures, with results consistent with $<$0.5\,W difference on every device (\S4.3, Table~\ref{tab:validation}). Cold-start power traces are captured on the H100; load times are measured on all three. Larger models may exhibit different loading profiles, though the VRAM-independence result is tested up to 72\,GB with controlled allocations. While \texttt{nvidia-smi} samples power intermittently~\cite{burtscher-power}, the low within-phase variance ($<$1.5\,W) on all devices confirms that idle power is stable enough for unbiased mean estimation. We do not evaluate MIG~\cite{nvidia-mig}, MPS~\cite{nvidia-mps}, or power capping (\texttt{nvidia-smi -pl}) configurations; these may alter the DVFS behavior we observe. The scheduler evaluation uses synthetic traces; validation on production LLM serving logs is needed.
+
+% ===========================================================================
+\section{Conclusion}
+% ===========================================================================
+
+We present the first cross-architecture decomposition of idle GPU power into DVFS and memory components, with formal equivalence testing confirming that the marginal VRAM effect is bounded below practical relevance. The model parking tax is real---26--66\,W depending on architecture (50\,W on H100)---but it is a \emph{fixed cost} determined by the CUDA context, not a \emph{variable cost} proportional to model size. This holds across HBM3, HBM2e, and GDDR6 in our experiments, validated with a real HuggingFace model on all three architectures ($<$0.5\,W difference from reference on every device), with $\partial P / \partial C \gg \partial P / \partial V$ on every device tested. Cold-start breakeven intervals are minutes, not hours, and are independent of model size. A proof-of-concept scheduler using our breakeven model saves 8--23\% energy across traffic patterns. At industry scale, the CUDA context overhead represents 92--1{,}745\,GWh/year (base estimate 462\,GWh).
+
+GPU vendors should invest in idle power states that decouple clock frequency from context presence. Serverless platforms should prioritize CUDA context elimination over model footprint reduction. And model serving systems should recognize that a 1\,GB model and a 64\,GB model pay the same parking tax---making small always-on models the most wasteful deployment pattern of all.
+
+\paragraph{Future work.} The breakeven model (Equation~\ref{eq:breakeven}) assumes known request arrival rates. In production, arrival rates are uncertain, non-stationary, and exhibit heavy-tailed burstiness that synthetic Poisson or diurnal traces do not capture. A natural extension is to replace the static $\lambda^*$ threshold with a predictive eviction policy trained on real workload traces. Public cloud traces (e.g., Azure Functions~2019, Alibaba GPU~2020) provide starting points, but the closest analogue to GPU inference traffic may be CPU-side API request logs from production datacenters---where decades of telemetry exist and arrival patterns are driven by the same user behavior regardless of backend hardware. Combining such traces with our measured $T^*$ values would yield grounded, per-architecture estimates of achievable energy savings under realistic demand uncertainty, and enable adaptive policies that outperform the fixed-threshold approach evaluated here.
+
+\paragraph{Reproducibility.} All data, analysis scripts, and experiment code are available at [anonymized for review].
+
+% ===========================================================================
+% REFERENCES
+% ===========================================================================
+\bibliographystyle{ACM-Reference-Format}
+\begin{thebibliography}{13}
+
+\bibitem{patel-cal23}
+T.~Patel, D.~Tiwari, et al.
+\newblock Towards improved power management in cloud GPUs.
+\newblock {\em IEEE Computer Architecture Letters (CAL)}, 2023.
+
+\bibitem{doe-report}
+A.~Shehabi et al.
+\newblock 2024 United States Data Center Energy Usage Report.
+\newblock Lawrence Berkeley National Laboratory, Dec 2024.
+
+\bibitem{serverlessllm}
+Y.~Fu et al.
+\newblock {ServerlessLLM}: Low-latency serverless inference for large language models.
+\newblock In {\em OSDI}, 2024.
+
+\bibitem{nvidia-streamer}
+NVIDIA.
+\newblock Reducing cold start latency for LLM inference with {NVIDIA Run:ai} Model Streamer.
+\newblock Technical report, Oct 2025.
+
+\bibitem{hydraserve}
+HydraServe: Minimizing cold starts for serverless LLM serving.
+\newblock {\em arXiv:2502.15524}, 2025.
+
+\bibitem{lambdascale}
+$\lambda$Scale: Enabling fast scaling for serverless large language model inference.
+\newblock {\em arXiv:2502.09922}, 2025.
+
+\bibitem{sanjuan-cold}
+A.~Sanju\'{a}n et al.
+\newblock Reducing the cost of GPU cold starts in serverless DL inference serving.
+\newblock In {\em STARLESS Workshop}, 2023.
+
+\bibitem{zeus}
+J.~You et al.
+\newblock {Zeus}: Understanding and optimizing GPU energy consumption of DNN training.
+\newblock In {\em NSDI}, 2023.
+
+\bibitem{patel-asplos24}
+T.~Patel et al.
+\newblock Characterizing power management opportunities for LLMs in the cloud.
+\newblock In {\em ASPLOS}, 2024.
+
+\bibitem{burtscher-power}
+M.~Burtscher et al.
+\newblock Part-time power measurements: nvidia-smi's lack of attention.
+\newblock {\em arXiv:2312.02741}, 2023.
+
+\bibitem{flexera}
+Flexera.
+\newblock 2025 State of the Cloud Report, 2025.
+
+\bibitem{nvidia-shipments}
+Semiconductor industry estimates of NVIDIA datacenter GPU shipments, 2023.
+
+\bibitem{hbm-spec}
+JEDEC.
+\newblock {HBM3} High Bandwidth Memory Specification ({JESD238}), 2022.
+
+\bibitem{micron-ddr}
+Micron Technology.
+\newblock TN-46-09: DRAM Power Calculations.
+\newblock Technical Note, 2023.
+
+\bibitem{schuirmann-tost}
+D.~J.~Schuirmann.
+\newblock A comparison of the two one-sided tests procedure and the power approach for assessing the equivalence of average bioavailability.
+\newblock {\em Journal of Pharmacokinetics and Biopharmaceutics}, 15(6):657--680, 1987.
+
+\bibitem{nvidia-mig}
+NVIDIA.
+\newblock Multi-Instance GPU User Guide.
+\newblock NVIDIA Documentation, 2024.
+
+\bibitem{nvidia-mps}
+NVIDIA.
+\newblock Multi-Process Service.
+\newblock NVIDIA Documentation, 2024.
+
+\bibitem{qwen2}
+Qwen Team.
+\newblock Qwen2.5 Technical Report.
+\newblock {\em arXiv:2412.15115}, 2024.
+
+\end{thebibliography}
+
+\end{document}

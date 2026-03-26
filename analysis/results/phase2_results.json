@@ -1,0 +1,109 @@
+{
+  "experiment": "phase2_controlled_vram_loading",
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "uuid": "GPU-anon-0002-0000-0000-000000000000",
+  "gpu_index": 1,
+  "host": "node-1",
+  "date": "2026-03-24",
+  "findings": {
+    "bare_idle_power_w": 71.64,
+    "bare_idle_sm_clock_mhz": 345,
+    "cuda_context_overhead_w": 48.33,
+    "cuda_active_sm_clock_mhz": 1980,
+    "vram_marginal_cost_w_per_gb": 0.0095,
+    "vram_marginal_cost_95ci": [
+      0.0018,
+      0.0172
+    ],
+    "vram_cost_at_64gb_w": 0.61,
+    "total_parking_tax_64gb_w": 48.94,
+    "parking_tax_breakdown": {
+      "cuda_context_pct": 98.8,
+      "vram_pct": 1.2
+    },
+    "regression_r_squared": 0.6607,
+    "regression_p_value": 0.0944,
+    "power_range_0_to_64gb_w": 0.84,
+    "hbm_temp_range_c": 3.6
+  },
+  "phase_data": [
+    {
+      "phase": "bare_idle",
+      "target_gb": "0",
+      "actual_mb": 4.0,
+      "power_mean": 71.642,
+      "power_std": 0.01988857852023444,
+      "power_min": 71.61,
+      "power_max": 71.67,
+      "temp": 36.0,
+      "mem_temp": 42.4,
+      "sm_clock": 345.0,
+      "n": 10
+    },
+    {
+      "phase": "phase1_0gb",
+      "target_gb": "0",
+      "actual_mb": 623.0,
+      "power_mean": 119.97,
+      "power_std": 0.41220275485628705,
+      "power_min": 119.37,
+      "power_max": 120.68,
+      "temp": 39.8,
+      "mem_temp": 45.3,
+      "sm_clock": 1980.0,
+      "n": 10
+    },
+    {
+      "phase": "phase2_4gb",
+      "target_gb": "4",
+      "actual_mb": 4717.0,
+      "power_mean": 120.542,
+      "power_std": 0.34015682657660534,
+      "power_min": 120.21,
+      "power_max": 120.9,
+      "temp": 40.0,
+      "mem_temp": 45.9,
+      "sm_clock": 1980.0,
+      "n": 10
+    },
+    {
+      "phase": "phase3_16gb",
+      "target_gb": "16",
+      "actual_mb": 17005.0,
+      "power_mean": 120.44700000000003,
+      "power_std": 0.3176318623815964,
+      "power_min": 120.23,
+      "power_max": 120.93,
+      "temp": 40.0,
+      "mem_temp": 46.0,
+      "sm_clock": 1980.0,
+      "n": 10
+    },
+    {
+      "phase": "phase4_48gb",
+      "target_gb": "48",
+      "actual_mb": 49773.0,
+      "power_mean": 120.731,
+      "power_std": 0.32623951664723694,
+      "power_min": 120.25,
+      "power_max": 120.98,
+      "temp": 40.0,
+      "mem_temp": 46.0,
+      "sm_clock": 1980.0,
+      "n": 10
+    },
+    {
+      "phase": "phase5_64gb",
+      "target_gb": "64",
+      "actual_mb": 66157.0,
+      "power_mean": 120.811,
+      "power_std": 0.26622672042202483,
+      "power_min": 120.3,
+      "power_max": 120.99,
+      "temp": 40.0,
+      "mem_temp": 45.8,
+      "sm_clock": 1980.0,
+      "n": 10
+    }
+  ]
+}

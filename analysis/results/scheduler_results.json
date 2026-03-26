@@ -1,0 +1,254 @@
+{
+  "Low Traffic (5 req/hr)": {
+    "always_on": {
+      "total_energy_wh": 2920.8,
+      "cold_starts": 1,
+      "requests": 129,
+      "cold_start_energy_wh": 0.0,
+      "idle_energy_wh": 2920.8,
+      "avg_cold_start_latency_s": 0.0
+    },
+    "ttl_1min": {
+      "total_energy_wh": 2232.476705524945,
+      "cold_starts": 119,
+      "requests": 129,
+      "cold_start_energy_wh": 446.25,
+      "idle_energy_wh": 1786.2267055249447,
+      "avg_cold_start_latency_s": 41.51162790697674
+    },
+    "ttl_2min": {
+      "total_energy_wh": 2306.339970247902,
+      "cold_starts": 113,
+      "requests": 129,
+      "cold_start_energy_wh": 423.75,
+      "idle_energy_wh": 1882.589970247902,
+      "avg_cold_start_latency_s": 39.41860465116279
+    },
+    "ttl_5min": {
+      "total_energy_wh": 2413.0620633739,
+      "cold_starts": 78,
+      "requests": 129,
+      "cold_start_energy_wh": 292.5,
+      "idle_energy_wh": 2120.5620633739,
+      "avg_cold_start_latency_s": 27.209302325581394
+    },
+    "ttl_10min": {
+      "total_energy_wh": 2543.2748106363624,
+      "cold_starts": 44,
+      "requests": 129,
+      "cold_start_energy_wh": 165.0,
+      "idle_energy_wh": 2378.2748106363624,
+      "avg_cold_start_latency_s": 15.348837209302326
+    },
+    "ttl_15min": {
+      "total_energy_wh": 2643.9714978186757,
+      "cold_starts": 30,
+      "requests": 129,
+      "cold_start_energy_wh": 112.5,
+      "idle_energy_wh": 2531.4714978186757,
+      "avg_cold_start_latency_s": 10.465116279069768
+    },
+    "ttl_30min": {
+      "total_energy_wh": 2767.549459514851,
+      "cold_starts": 8,
+      "requests": 129,
+      "cold_start_energy_wh": 30.0,
+      "idle_energy_wh": 2737.549459514851,
+      "avg_cold_start_latency_s": 2.7906976744186047
+    },
+    "ttl_60min": {
+      "total_energy_wh": 2848.6354783662227,
+      "cold_starts": 2,
+      "requests": 129,
+      "cold_start_energy_wh": 7.5,
+      "idle_energy_wh": 2841.1354783662227,
+      "avg_cold_start_latency_s": 0.6976744186046512
+    },
+    "breakeven_standard": {
+      "total_energy_wh": 2391.639909195644,
+      "cold_starts": 81,
+      "requests": 129,
+      "cold_start_energy_wh": 303.75,
+      "idle_energy_wh": 2087.889909195644,
+      "avg_cold_start_latency_s": 28.25581395348837
+    },
+    "breakeven_fast": {
+      "total_energy_wh": 2212.8417055249433,
+      "cold_starts": 119,
+      "requests": 129,
+      "cold_start_energy_wh": 446.25,
+      "idle_energy_wh": 1766.5917055249433,
+      "avg_cold_start_latency_s": 41.51162790697674
+    }
+  },
+  "Bursty Traffic (2/60 req/hr)": {
+    "always_on": {
+      "total_energy_wh": 2920.8,
+      "cold_starts": 1,
+      "requests": 480,
+      "cold_start_energy_wh": 0.0,
+      "idle_energy_wh": 2920.8,
+      "avg_cold_start_latency_s": 0.0
+    },
+    "ttl_1min": {
+      "total_energy_wh": 2491.4112177902607,
+      "cold_starts": 176,
+      "requests": 480,
+      "cold_start_energy_wh": 660.0,
+      "idle_energy_wh": 1831.4112177902605,
+      "avg_cold_start_latency_s": 16.5
+    },
+    "ttl_2min": {
+      "total_energy_wh": 2275.391301959131,
+      "cold_starts": 90,
+      "requests": 480,
+      "cold_start_energy_wh": 337.5,
+      "idle_energy_wh": 1937.8913019591312,
+      "avg_cold_start_latency_s": 8.4375
+    },
+    "ttl_5min": {
+      "total_energy_wh": 2263.773128518533,
+      "cold_starts": 47,
+      "requests": 480,
+      "cold_start_energy_wh": 176.25,
+      "idle_energy_wh": 2087.523128518533,
+      "avg_cold_start_latency_s": 4.40625
+    },
+    "ttl_10min": {
+      "total_energy_wh": 2368.0712811021353,
+      "cold_starts": 34,
+      "requests": 480,
+      "cold_start_energy_wh": 127.5,
+      "idle_energy_wh": 2240.5712811021353,
+      "avg_cold_start_latency_s": 3.1875
+    },
+    "ttl_15min": {
+      "total_energy_wh": 2486.9560433919096,
+      "cold_starts": 31,
+      "requests": 480,
+      "cold_start_energy_wh": 116.25,
+      "idle_energy_wh": 2370.7060433919096,
+      "avg_cold_start_latency_s": 2.90625
+    },
+    "ttl_30min": {
+      "total_energy_wh": 2687.7863275032214,
+      "cold_starts": 11,
+      "requests": 480,
+      "cold_start_energy_wh": 41.25,
+      "idle_energy_wh": 2646.5363275032214,
+      "avg_cold_start_latency_s": 1.03125
+    },
+    "ttl_60min": {
+      "total_energy_wh": 2727.2025092847243,
+      "cold_starts": 1,
+      "requests": 480,
+      "cold_start_energy_wh": 3.75,
+      "idle_energy_wh": 2723.4525092847243,
+      "avg_cold_start_latency_s": 0.09375
+    },
+    "breakeven_standard": {
+      "total_energy_wh": 2248.392012526364,
+      "cold_starts": 48,
+      "requests": 480,
+      "cold_start_energy_wh": 180.0,
+      "idle_energy_wh": 2068.392012526364,
+      "avg_cold_start_latency_s": 4.5
+    },
+    "breakeven_fast": {
+      "total_energy_wh": 2587.6127164953687,
+      "cold_starts": 210,
+      "requests": 480,
+      "cold_start_energy_wh": 787.5,
+      "idle_energy_wh": 1800.1127164953687,
+      "avg_cold_start_latency_s": 19.6875
+    }
+  },
+  "Diurnal Pattern (peak 30 req/hr)": {
+    "always_on": {
+      "total_energy_wh": 2920.8,
+      "cold_starts": 1,
+      "requests": 337,
+      "cold_start_energy_wh": 0.0,
+      "idle_energy_wh": 2920.8,
+      "avg_cold_start_latency_s": 0.0
+    },
+    "ttl_1min": {
+      "total_energy_wh": 2721.9300397534234,
+      "cold_starts": 231,
+      "requests": 337,
+      "cold_start_energy_wh": 866.25,
+      "idle_energy_wh": 1855.6800397534237,
+      "avg_cold_start_latency_s": 30.845697329376854
+    },
+    "ttl_2min": {
+      "total_energy_wh": 2694.9688132883866,
+      "cold_starts": 179,
+      "requests": 337,
+      "cold_start_energy_wh": 671.25,
+      "idle_energy_wh": 2023.7188132883864,
+      "avg_cold_start_latency_s": 23.902077151335313
+    },
+    "ttl_5min": {
+      "total_energy_wh": 2670.5591764659152,
+      "cold_starts": 87,
+      "requests": 337,
+      "cold_start_energy_wh": 326.25,
+      "idle_energy_wh": 2344.3091764659152,
+      "avg_cold_start_latency_s": 11.617210682492582
+    },
+    "ttl_10min": {
+      "total_energy_wh": 2700.9776039683043,
+      "cold_starts": 34,
+      "requests": 337,
+      "cold_start_energy_wh": 127.5,
+      "idle_energy_wh": 2573.4776039683043,
+      "avg_cold_start_latency_s": 4.540059347181009
+    },
+    "ttl_15min": {
+      "total_energy_wh": 2722.808800402171,
+      "cold_starts": 14,
+      "requests": 337,
+      "cold_start_energy_wh": 52.5,
+      "idle_energy_wh": 2670.308800402171,
+      "avg_cold_start_latency_s": 1.8694362017804154
+    },
+    "ttl_30min": {
+      "total_energy_wh": 2750.1358657143605,
+      "cold_starts": 4,
+      "requests": 337,
+      "cold_start_energy_wh": 15.0,
+      "idle_energy_wh": 2735.1358657143605,
+      "avg_cold_start_latency_s": 0.5341246290801187
+    },
+    "ttl_60min": {
+      "total_energy_wh": 2763.5711452922505,
+      "cold_starts": 1,
+      "requests": 337,
+      "cold_start_energy_wh": 3.75,
+      "idle_energy_wh": 2759.8211452922505,
+      "avg_cold_start_latency_s": 0.13353115727002968
+    },
+    "breakeven_standard": {
+      "total_energy_wh": 2681.482243035186,
+      "cold_starts": 100,
+      "requests": 337,
+      "cold_start_energy_wh": 375.0,
+      "idle_energy_wh": 2306.482243035186,
+      "avg_cold_start_latency_s": 13.353115727002967
+    },
+    "breakeven_fast": {
+      "total_energy_wh": 2749.750756108844,
+      "cold_starts": 249,
+      "requests": 337,
+      "cold_start_energy_wh": 933.75,
+      "idle_energy_wh": 1816.0007561088441,
+      "avg_cold_start_latency_s": 33.24925816023739
+    }
+  },
+  "breakeven_times": {
+    "T_star_standard_s": 270.54108216432866,
+    "T_star_fast_s": 48.09619238476954,
+    "T_star_standard_min": 4.509018036072145,
+    "T_star_fast_min": 0.8016032064128257
+  }
+}

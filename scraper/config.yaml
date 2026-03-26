@@ -16,7 +16,7 @@ query_lookback: 60
 query_step: "30s"
 
 # Output directory for raw CSV files (one per day)
-output_dir: "../data/raw"
+output_dir: "../data/telemetry"
 
 # ============================================================
 # METRICS — all 41 available DCGM metrics, grouped by purpose
@@ -104,20 +104,20 @@ label_keys:
 workload_rules:
   - category: "llm_inference"
     match:
-      container_patterns: ["vllm*", "*-vllm", "*vllm*", "qwen*", "mistral*", "llama*", "sl-*-app", "pod-*-app"]
-      namespace_patterns: ["mineru"]
+      container_patterns: ["vllm*", "*-vllm", "*vllm*", "llm-serve-*"]
+      namespace_patterns: ["inference"]
 
   - category: "embedding"
     match:
-      container_patterns: ["embeddify*", "embed*"]
+      container_patterns: ["embed-*", "embedding-*"]
 
   - category: "voice_ai"
     match:
-      container_patterns: ["ax-echo*", "phonos*", "livekit*"]
+      container_patterns: ["voice-*", "audio-*", "livekit*"]
 
   - category: "computer_vision"
     match:
-      container_patterns: ["cctv*", "vision*", "yolo*", "detectron*"]
+      container_patterns: ["vision-*", "yolo*", "detectron*"]
 
   - category: "other"
     match:
