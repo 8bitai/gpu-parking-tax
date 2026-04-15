@@ -21,7 +21,11 @@
 \title{The Model Parking Tax: Quantifying the Hidden Energy Cost of Always-On GPU Model Deployment}
 
 \author{Sai Sathvik Vadari}
-\affiliation{\institution{\href{https://www.8bit.ai/}{8bit.ai}}}
+\affiliation{
+    \institution{\href{https://www.8bit.ai/}{8bit.ai}} 
+    \city{Hyderabad}
+    \country{India}
+}
 
 \begin{abstract}
 The AI inference industry keeps models loaded in GPU memory around the clock to avoid cold-start latency, implicitly treating idle power as a fixed cost of readiness. Yet the structure of this cost has never been empirically decomposed---and never across GPU architectures. We present the first cross-architecture measurement of idle GPU power as a function of VRAM allocation, combining 18~days of production telemetry (\num{335267} samples, 14~H100 GPUs) with controlled dose-response experiments on three GPU architectures spanning three memory technologies: NVIDIA H100 (HBM3, 80\,GB), A100 (HBM2e, 80\,GB), and L40S (GDDR6, 48\,GB). We observe that idle power is \emph{piecewise constant} on all three architectures: the CUDA context forces a discrete DVFS transition consuming $+26$--$66$\,W over bare idle (26--50\,W on HBM architectures, 66\,W on GDDR6), while the marginal VRAM effect is bounded below measurement relevance ($|\beta| < 0.02$\,W/GB) on every device tested. The CUDA context accounts for $>$98\% of the parking tax regardless of memory technology. We validate this finding with a real HuggingFace model (Qwen2.5-7B) on all three architectures, confirming $<$0.5\,W difference from empty tensors on every device, and capture cold-start power profiles during model loading. We derive a cold-start breakeven model showing energy-optimal behavior depends on request arrival rate and loading latency---not model size---with breakeven intervals of 1--5~minutes. Our results identify a constraint consistent across all tested architectures: idle-with-context power is determined by DVFS state, not memory occupancy.
