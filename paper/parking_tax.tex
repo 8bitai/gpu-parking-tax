@@ -144,7 +144,7 @@ The noisiest GPU (L40S, GDDR6) has $\sigma < 1.5$\,W; the cleanest (A100, HBM2e)
     \Delta P_{\text{VRAM}} < 1\,\text{W across full VRAM range on all GPUs}
     \label{eq:bound}
 \end{equation}
-This converts our measurement limitation into a \emph{result constraint}. Regarding Burtscher et al.'s~\cite{burtscher-power} finding that \texttt{nvidia-smi} undersamples: our within-phase standard deviations confirm idle power is stable enough that subsampling does not bias means.
+This converts our measurement limitation into a \emph{result constraint}. Regarding Burtscher et al.'s~\cite{burtscher-power} finding that \texttt{nvidia-smi} undersamples: our within-phase standard deviations confirm idle power is stable enough that subsampling does not bias means. Complementary per-instruction energy models such as Wattchmen~\cite{wattchmen} achieve finer-grained decomposition; extending our idle-state analysis with such methods is a promising direction.
 
 % ===========================================================================
 \section{Results}
@@ -301,7 +301,7 @@ Run:ai Streamer (8B) & 200 & 5 & 20\,s \\
 \end{equation}
 For H100 with PyTorch loading: $\lambda^* \approx 13$\,req/hr. For A100: $\lambda^* \approx 7$\,req/hr. For L40S: $\lambda^* \approx 18$\,req/hr. Below these rates, cold-starting saves energy.
 
-\paragraph{Model-size independence.} Because $P_{\text{park}}$ is a fixed cost (independent of $V$), $T^*$ depends only on loading power and time---not model size. Small models are the \emph{worst} candidates for always-on deployment: they reload in seconds yet pay the full parking tax.
+\paragraph{Model-size independence.} Our experiments suggest that, for the tested systems, CUDA context overhead dominates idle power consumption compared to model-size-dependent VRAM effects. Because $P_{\text{park}}$ behaves as a fixed cost in our measurements, $T^*$ depends primarily on loading power and time rather than model size. Small models are thus the \emph{worst} candidates for always-on deployment: they reload in seconds yet pay the full parking tax.
 
 \paragraph{Limitations of the breakeven model.} We approximate $P_{\text{load}}$ as constant during loading; real cold starts exhibit bursty power profiles (I/O phases, deserialization, weight transfer), which would slightly reduce $T^*$. We also do not model the latency cost to users---only the energy cost to operators.
 
@@ -400,7 +400,7 @@ Breakeven ($T^*$=4.5\,min) & 2{,}682 & 8.2\% & 100 \\
 
 We present the first cross-architecture decomposition of idle GPU power into DVFS and memory components, with formal equivalence testing confirming that the marginal VRAM effect is bounded below practical relevance. The model parking tax is real---26--66\,W depending on architecture (50\,W on H100)---but it is a \emph{fixed cost} determined by the CUDA context, not a \emph{variable cost} proportional to model size. This holds across HBM3, HBM2e, and GDDR6 in our experiments, validated with a real HuggingFace model on all three architectures ($<$0.5\,W difference from reference on every device), with $\partial P / \partial C \gg \partial P / \partial V$ on every device tested. Cold-start breakeven intervals are minutes, not hours, and are independent of model size. A proof-of-concept scheduler using our breakeven model saves 8--23\% energy across traffic patterns. At industry scale, the CUDA context overhead represents 92--1{,}745\,GWh/year (base estimate 462\,GWh).
 
-GPU vendors should invest in idle power states that decouple clock frequency from context presence. Serverless platforms should prioritize CUDA context elimination over model footprint reduction. And model serving systems should recognize that a 1\,GB model and a 64\,GB model pay the same parking tax---making small always-on models the most wasteful deployment pattern of all.
+GPU vendors should invest in idle power states that decouple clock frequency from context presence. Serverless platforms should prioritize CUDA context elimination over model footprint reduction. And model serving systems should recognize that, on every architecture and allocation range we tested, a 1\,GB model and a 64\,GB model pay the same parking tax---making small always-on models the most wasteful deployment pattern of all.
 
 \paragraph{Future work.} The breakeven model (Equation~\ref{eq:breakeven}) assumes known request arrival rates. In production, arrival rates are uncertain, non-stationary, and exhibit heavy-tailed burstiness that synthetic Poisson or diurnal traces do not capture. A natural extension is to replace the static $\lambda^*$ threshold with a predictive eviction policy trained on real workload traces. Public cloud traces (e.g., Azure Functions~2019, Alibaba GPU~2020) provide starting points, but the closest analogue to GPU inference traffic may be CPU-side API request logs from production datacenters---where decades of telemetry exist and arrival patterns are driven by the same user behavior regardless of backend hardware. Combining such traces with our measured $T^*$ values would yield grounded, per-architecture estimates of achievable energy savings under realistic demand uncertainty, and enable adaptive policies that outperform the fixed-threshold approach evaluated here.
 
@@ -496,6 +496,11 @@ NVIDIA.
 Qwen Team.
 \newblock Qwen2.5 Technical Report.
 \newblock {\em arXiv:2412.15115}, 2024.
+
+\bibitem{wattchmen}
+B.~Tran, M.~Maiterth, W.~Shin, M.~D.~Sinclair, S.~Venkataraman.
+\newblock Wattchmen: Watching the Wattchers---High Fidelity, Flexible {GPU} Energy Modeling.
+\newblock In {\em ICS}, 2026.
 
 \end{thebibliography}
 
