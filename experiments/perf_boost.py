@@ -20,6 +20,10 @@ Measurements per condition:
 Prerequisites:
   - NVIDIA driver >= 580.105.08
   - pip install torch vllm transformers
+  - A100 and H100 are both supported (same code path; 16GB static alloc fits either card).
+  - On hosts with a small root disk (e.g. RunPod docker overlay), either export HF
+    cache env vars or pass --hf-cache; by default the script uses
+    /workspace/.cache/huggingface if /workspace exists.
 
 Usage:
   # Run all conditions on GPU 0
@@ -33,6 +37,9 @@ Usage:
 
   # Custom vLLM model
   python perf_boost.py --gpu 0 --model Qwen/Qwen2.5-7B
+
+  # Pin Hugging Face / model cache to a large volume (e.g. RunPod /workspace)
+  python perf_boost.py --gpu 0 --hf-cache /workspace/.cache/huggingface
 """
 
 import argparse
@@ -48,6 +55,42 @@ from pathlib import Path
 DEFAULT_MODEL = "Qwen/Qwen2.5-7B"
 VLLM_PORT = 8192
 MIN_DRIVER_VERSION = (580, 105, 8)
+# If /workspace exists (common on RunPod), use it so HF and vLLM do not fill small OS disks.
+_HF_DEFAULT_AUTO = "/workspace/.cache/huggingface"
+
+
+def setup_hf_cache(cache_root=None):
+    """Set HF cache env for this process and all child subprocesses.
+
+    Resolution order:
+      1) *cache_root* (from --hf-cache) if set
+      2) existing ``HF_HOME`` in the environment (return without overriding)
+      3) * _HF_DEFAULT_AUTO* when ``/workspace`` exists (typical RunPod)
+      4) else leave default HF cache locations unchanged (returns None)
+
+    Set ``PERF_BOOST_NO_HF_CACHE_AUTO=1`` to disable step 3.
+
+    Returns the effective cache root (string), or None if step 2 or 4 applies.
+    """
+    root = (cache_root or "").strip() or None
+    if root is None and os.environ.get("HF_HOME"):
+        return os.environ["HF_HOME"].rstrip("/")
+    if root is None and Path("/workspace").is_dir() and not os.environ.get(
+        "PERF_BOOST_NO_HF_CACHE_AUTO"
+    ):
+        root = _HF_DEFAULT_AUTO
+    if not root:
+        return None
+    p = Path(root)
+    p.mkdir(parents=True, exist_ok=True)
+    hub = p / "hub"
+    hub.mkdir(parents=True, exist_ok=True)
+    tfc = p / "transformers"
+    tfc.mkdir(parents=True, exist_ok=True)
+    os.environ["HF_HOME"] = str(p)
+    os.environ["HUGGINGFACE_HUB_CACHE"] = str(hub)
+    os.environ["TRANSFORMERS_CACHE"] = str(tfc)
+    return str(p)
 
 
 def now_utc():
@@ -248,7 +291,7 @@ def run_static_conditions(gpu_id, phase_duration, interval, output_path):
     log(f"\n{'=' * 60}")
     log("BARE IDLE (no CUDA context, no flag)")
     log(f"{'=' * 60}")
-    log(f"  Phase: bare_idle")
+    log("  Phase: bare_idle")
     bare = record_phase(
         output_path, gpu_id, "bare_idle", "bare",
         phase_duration, interval,
@@ -298,7 +341,7 @@ def start_vllm_server(gpu_id, model, env_flag=False):
         "--dtype", "float16",
         "--port", str(VLLM_PORT),
         "--max-model-len", "4096",
-        "--disable-log-requests",
+        "--no-enable-log-requests",
     ]
     log(f"  Starting vLLM: {' '.join(cmd)}")
     proc = subprocess.Popen(
@@ -535,6 +578,9 @@ def run_experiment(args):
     log(f"Sample interval: {interval}s")
     log(f"Quick mode: {args.quick}")
     log(f"Skip vLLM: {args.skip_vllm}")
+    hfc = getattr(args, "hf_cache_resolved", None)
+    if hfc:
+        log(f"Hugging Face cache: {hfc}")
 
     manifest = {
         "experiment": "cuda_disable_perf_boost",
@@ -543,6 +589,7 @@ def run_experiment(args):
         "gpu_name": gpu_name,
         "gpu_uuid": snap["uuid"],
         "driver_version": version,
+        "huggingface_cache_root": getattr(args, "hf_cache_resolved", None),
         "phase_duration_s": phase_duration,
         "sample_interval_s": interval,
         "quick_mode": args.quick,
@@ -645,7 +692,20 @@ def main():
     parser.add_argument("--output-dir", type=str,
                         default="data/experiments/perf_boost",
                         help="Output directory")
+    parser.add_argument(
+        "--hf-cache",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Hugging Face root cache (sets HF_HOME, HUGGINGFACE_HUB_CACHE, "
+            "TRANSFORMERS_CACHE). "
+            f"Default: use {_HF_DEFAULT_AUTO} if /workspace exists, else use "
+            "existing HF_HOME or system default"
+        ),
+    )
     args = parser.parse_args()
+    args.hf_cache_resolved = setup_hf_cache(args.hf_cache)
     run_experiment(args)
 
 
