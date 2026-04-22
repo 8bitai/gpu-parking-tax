@@ -12,7 +12,8 @@ This paper presents the first cross-architecture measurement of idle GPU power a
 
 ```
 paper/                                  LaTeX source and figures
-  parking_tax.tex                       Main paper
+  parking_tax.tex                       arXiv v1 paper
+  hotcarbon.tex                         HotCarbon 2026 workshop version (v2)
   cross_architecture_dose_response.png  Figure 1: three GPUs, dose-response curves
   parking_tax_decomposition.png         Figure 2: base/context/VRAM bar chart
   vram_regression_detail.png            Figure 3: zoomed regression per GPU
@@ -28,6 +29,7 @@ scraper/                                Phase 1: production telemetry collection
 experiments/                            Phase 2: controlled experiments
   dose_response.py                      VRAM dose-response (auto-detects GPU arch)
   model_validation.py                   Real model validation (Qwen2.5-7B on all GPUs)
+  perf_boost.py                         CUDA_DISABLE_PERF_BOOST evaluation (v2)
   scheduler_simulation.py               Breakeven scheduler simulation (Section 6)
 
 analysis/                               Analysis and figure generation
@@ -101,6 +103,16 @@ Real model validation:
 
 ```bash
 uv run python experiments/model_validation.py --gpu 0
+```
+
+CUDA\_DISABLE\_PERF\_BOOST evaluation (requires GPU + driver >= 580.105.08):
+
+```bash
+# Full experiment (baseline + flag + vLLM, ~3 hours)
+uv run python experiments/perf_boost.py --gpu 0
+
+# Quick mode, skip vLLM (~1 hour)
+uv run python experiments/perf_boost.py --gpu 0 --quick --skip-vllm
 ```
 
 Scheduler simulation (no GPU needed):
