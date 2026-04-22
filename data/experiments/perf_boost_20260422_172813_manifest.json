@@ -1,0 +1,21 @@
+{
+  "experiment": "cuda_disable_perf_boost",
+  "start_time": "2026-04-22T17:28:13.407759+00:00",
+  "gpu_id": 0,
+  "gpu_name": "NVIDIA A100-SXM4-80GB",
+  "gpu_uuid": "GPU-2fef2d93-421a-1b90-30b1-206b317e0017",
+  "driver_version": "580.126.16",
+  "huggingface_cache_root": "/workspace/.cache/huggingface",
+  "phase_duration_s": 1200,
+  "sample_interval_s": 30,
+  "quick_mode": false,
+  "conditions": [
+    "bare",
+    "baseline",
+    "flag_on",
+    "vllm_baseline",
+    "vllm_flag_on"
+  ],
+  "vllm_model": "Qwen/Qwen2.5-7B",
+  "end_time": "2026-04-22T19:20:28.895458+00:00"
+}

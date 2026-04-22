@@ -32,6 +32,9 @@ Usage:
   # Static tests only (skip vLLM)
   python perf_boost.py --gpu 0 --skip-vllm
 
+  # vLLM conditions only (skip static torch.empty phases; new output files)
+  python perf_boost.py --gpu 0 --vllm-only
+
   # Quick mode (5-min phases instead of 20-min)
   python perf_boost.py --gpu 0 --quick
 
@@ -344,8 +347,9 @@ def start_vllm_server(gpu_id, model, env_flag=False):
         "--no-enable-log-requests",
     ]
     log(f"  Starting vLLM: {' '.join(cmd)}")
+    # Do not use PIPE: vLLM logs can fill the buffer and block the child.
     proc = subprocess.Popen(
-        cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     return proc
 
@@ -578,6 +582,7 @@ def run_experiment(args):
     log(f"Sample interval: {interval}s")
     log(f"Quick mode: {args.quick}")
     log(f"Skip vLLM: {args.skip_vllm}")
+    log(f"vLLM only: {getattr(args, 'vllm_only', False)}")
     hfc = getattr(args, "hf_cache_resolved", None)
     if hfc:
         log(f"Hugging Face cache: {hfc}")
@@ -593,19 +598,26 @@ def run_experiment(args):
         "phase_duration_s": phase_duration,
         "sample_interval_s": interval,
         "quick_mode": args.quick,
+        "vllm_only": getattr(args, "vllm_only", False),
         "conditions": [],
     }
 
     # Create the output file
     output_path.touch()
 
-    log("\n" + "=" * 60)
-    log("PART 1: Static conditions (torch.empty 16 GB)")
-    log("=" * 60)
-    static_results = run_static_conditions(
-        args.gpu, phase_duration, interval, output_path,
-    )
-    manifest["conditions"].extend(["bare", "baseline", "flag_on"])
+    static_results = {}
+    if getattr(args, "vllm_only", False):
+        log("\n" + "=" * 60)
+        log("PART 1: Skipped (--vllm-only)")
+        log("=" * 60)
+    else:
+        log("\n" + "=" * 60)
+        log("PART 1: Static conditions (torch.empty 16 GB)")
+        log("=" * 60)
+        static_results = run_static_conditions(
+            args.gpu, phase_duration, interval, output_path,
+        )
+        manifest["conditions"].extend(["bare", "baseline", "flag_on"])
 
     vllm_results = {}
     if not args.skip_vllm:
@@ -637,18 +649,21 @@ def run_experiment(args):
     base_mean = _mean_power(static_results.get("baseline", {}).get("cuda_ctx_16gb", []))
     flag_mean = _mean_power(static_results.get("flag_on", {}).get("cuda_ctx_16gb", []))
 
-    log("\n--- STATIC RESULTS ---")
-    if bare_mean is not None:
-        log(f"  Bare idle:        {bare_mean:.1f} W")
-    if base_mean is not None:
-        log(f"  CUDA ctx + 16GB:  {base_mean:.1f} W")
-    if flag_mean is not None:
-        log(f"  Flag on + 16GB:   {flag_mean:.1f} W")
-    if base_mean is not None and flag_mean is not None:
-        log(f"  Flag reduction:   {base_mean - flag_mean:+.1f} W "
-            f"({100 * (base_mean - flag_mean) / base_mean:.1f}%)")
-    if bare_mean is not None and flag_mean is not None:
-        log(f"  Flag vs bare:     {flag_mean - bare_mean:+.1f} W")
+    if not getattr(args, "vllm_only", False):
+        log("\n--- STATIC RESULTS ---")
+        if bare_mean is not None:
+            log(f"  Bare idle:        {bare_mean:.1f} W")
+        if base_mean is not None:
+            log(f"  CUDA ctx + 16GB:  {base_mean:.1f} W")
+        if flag_mean is not None:
+            log(f"  Flag on + 16GB:   {flag_mean:.1f} W")
+        if base_mean is not None and flag_mean is not None:
+            log(f"  Flag reduction:   {base_mean - flag_mean:+.1f} W "
+                f"({100 * (base_mean - flag_mean) / base_mean:.1f}%)")
+        if bare_mean is not None and flag_mean is not None:
+            log(f"  Flag vs bare:     {flag_mean - bare_mean:+.1f} W")
+    else:
+        log("\n--- STATIC RESULTS ---  (not run)")
 
     if not args.skip_vllm:
         vbase_mean = _mean_power(
@@ -685,6 +700,11 @@ def main():
                         help="Quick mode: 5-min phases instead of 20-min")
     parser.add_argument("--skip-vllm", action="store_true",
                         help="Skip vLLM conditions")
+    parser.add_argument(
+        "--vllm-only",
+        action="store_true",
+        help="Run only vLLM conditions (skip static); writes new jsonl + manifest",
+    )
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL,
                         help=f"vLLM model (default: {DEFAULT_MODEL})")
     parser.add_argument("--interval", type=int, default=30,
@@ -705,6 +725,8 @@ def main():
         ),
     )
     args = parser.parse_args()
+    if args.skip_vllm and args.vllm_only:
+        parser.error("Cannot use --skip-vllm and --vllm-only together")
     args.hf_cache_resolved = setup_hf_cache(args.hf_cache)
     run_experiment(args)
 
