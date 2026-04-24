@@ -193,30 +193,35 @@ def perf_boost_power_comparison():
     print("  Saved perf_boost_power_comparison")
 
 
+LATENCY_RETEST_FILES = {
+    "H100 SXM": "data/experiments/latency_retest_20260424_104808.json",
+    "A100 SXM4": "data/experiments/latency_retest_20260424_111639.json",
+}
+
+
 def perf_boost_latency():
-    """Latency comparison: strip plot + box overlay for both GPUs."""
+    """Latency comparison using retest data: cold burst + warm steady-state."""
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
 
-    for ax, (gpu_label, filepath) in zip(axes, DATA_FILES.items()):
-        _, latency_rows = load_data(filepath)
+    for ax, (gpu_label, filepath) in zip(axes, LATENCY_RETEST_FILES.items()):
+        with open(filepath) as f:
+            data = json.load(f)
         color = GPU_COLORS[gpu_label]
 
-        # Group latency by condition
-        by_cond = defaultdict(list)
-        for r in latency_rows:
-            by_cond[r["condition"]].extend(r["latency"]["all"])
+        # Extract warm latencies (ms) for both conditions
+        baseline_result = [r for r in data["results"] if r["condition"] == "baseline"][0]
+        flag_result = [r for r in data["results"] if r["condition"] == "flag_on"][0]
 
-        baseline_lats = np.array(by_cond.get("vllm_baseline", [])) * 1000  # to ms
-        flag_lats = np.array(by_cond.get("vllm_flag_on", [])) * 1000
+        baseline_warm = np.array([l for l in baseline_result["warm"]["all"] if l is not None]) * 1000
+        flag_warm = np.array([l for l in flag_result["warm"]["all"] if l is not None]) * 1000
 
-        if len(baseline_lats) == 0 or len(flag_lats) == 0:
-            ax.text(0.5, 0.5, "No latency data", transform=ax.transAxes,
-                    ha="center", va="center", fontsize=12)
-            continue
+        # Cold first-request latencies
+        baseline_cold1 = baseline_result["cold"]["all"][0] * 1000
+        flag_cold1 = flag_result["cold"]["all"][0] * 1000
 
-        # Box plot
+        # Box plot for warm (steady-state) latencies
         bp = ax.boxplot(
-            [baseline_lats, flag_lats],
+            [baseline_warm, flag_warm],
             positions=[0, 1],
             widths=0.4,
             patch_artist=True,
@@ -228,7 +233,6 @@ def perf_boost_latency():
             capprops=dict(linewidth=1.2),
         )
 
-        # Color boxes
         bp["boxes"][0].set_facecolor(color)
         bp["boxes"][0].set_alpha(0.7)
         bp["boxes"][1].set_facecolor(color)
@@ -236,29 +240,31 @@ def perf_boost_latency():
         bp["boxes"][1].set_hatch("//")
 
         # Overlay individual points (jittered)
-        for i, (lats, pos) in enumerate([(baseline_lats, 0), (flag_lats, 1)]):
+        for i, (lats, pos) in enumerate([(baseline_warm, 0), (flag_warm, 1)]):
             jitter = np.random.default_rng(42).normal(0, 0.04, len(lats))
-            alpha = 0.5 if i == 0 else 0.5
             ax.scatter(np.full_like(lats, pos) + jitter, lats,
-                      c=color, alpha=alpha, s=15, zorder=4,
+                      c=color, alpha=0.5, s=15, zorder=4,
                       edgecolors="black", linewidths=0.3)
 
+        # Mark cold first-request as a distinct marker
+        ax.scatter([0], [baseline_cold1], marker="v", s=80, c="gray",
+                  edgecolors="black", linewidths=1, zorder=10, label=f"Cold req 1: {baseline_cold1:.0f}ms")
+        ax.scatter([1], [flag_cold1], marker="v", s=80, c="red",
+                  edgecolors="black", linewidths=1, zorder=10, label=f"Cold req 1: {flag_cold1:.0f}ms")
+
         # Stats annotation
-        b_mean = np.mean(baseline_lats)
-        f_mean = np.mean(flag_lats)
-        b_p50 = np.median(baseline_lats)
-        f_p50 = np.median(flag_lats)
+        b_mean = np.mean(baseline_warm)
+        f_mean = np.mean(flag_warm)
         diff_mean = f_mean - b_mean
-        diff_p50 = f_p50 - b_p50
+        ramp = flag_cold1 - f_mean
 
         stats_text = (
-            f"Baseline: {b_mean:.1f}ms mean\n"
-            f"Flag on:  {f_mean:.1f}ms mean\n"
+            f"Warm mean: {f_mean:.1f} vs {b_mean:.1f}ms\n"
             f"$\\Delta$mean: {diff_mean:+.1f}ms ({diff_mean/b_mean*100:+.1f}%)\n"
-            f"$\\Delta$p50: {diff_p50:+.1f}ms"
+            f"Cold ramp: +{ramp:.0f}ms (req 1 only)"
         )
-        ax.text(0.98, 0.98, stats_text, transform=ax.transAxes,
-                fontsize=7, va="top", ha="right",
+        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+                fontsize=7, va="top", ha="left",
                 bbox=dict(boxstyle="round,pad=0.4", facecolor="white",
                          edgecolor=color, alpha=0.9))
 
@@ -267,6 +273,7 @@ def perf_boost_latency():
                            fontsize=9)
         ax.set_ylabel("Request Latency (ms)")
         ax.set_title(gpu_label, fontweight="bold")
+        ax.legend(fontsize=6, loc="center left", bbox_to_anchor=(0.0, 0.55))
 
     fig.suptitle("Inference Latency: Baseline vs CUDA_DISABLE_PERF_BOOST",
                 fontweight="bold", fontsize=12, y=1.03)

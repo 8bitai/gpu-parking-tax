@@ -1,0 +1,5 @@
+- [User profile](user_profile.md) — Sathvik Vadari, 8bit.ai, GPU energy research
+- [HotCarbon v2 plan](project_v2_plan.md) — v2 paper plan: CUDA_DISABLE_PERF_BOOST + Lei et al., deadline 2026-05-18
+- [Paper 2 MLSys plan](project_paper2_mlsys.md) — Eviction strategies paper for MLSys, parking_tax.tex is the foundation
+- [Multi-GPU experiment](project_multi_gpu.md) — TP/DP parking tax experiment at experiments/multi_gpu/, shared utils at experiments/_common/
+- [Thesis direction](project_thesis_direction.md) — CEO: orient thesis toward dynamic flag toggling prescription (on during idle, off on request)
