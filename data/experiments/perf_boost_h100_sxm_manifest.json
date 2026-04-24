@@ -1,6 +1,7 @@
 {
   "experiment": "cuda_disable_perf_boost",
   "start_time": "2026-04-22T17:39:31.622941+00:00",
+  "end_time": "2026-04-22T20:44:22.323890+00:00",
   "gpu_id": 0,
   "gpu_name": "NVIDIA H100 80GB HBM3",
   "gpu_uuid": "GPU-58a85bda-0b5f-0ca6-11a8-8beb4047c4f9",
@@ -17,5 +18,9 @@
     "vllm_flag_on"
   ],
   "vllm_model": "Qwen/Qwen2.5-7B",
-  "end_time": "2026-04-22T19:03:09.072924+00:00"
+  "note": "Merged from two runs on the same GPU. Conditions bare/baseline/flag_on from run starting 2026-04-22T17:39:31Z; vllm_baseline/vllm_flag_on from a separate rerun starting 2026-04-22T19:55:11Z.",
+  "source_runs": [
+    "perf_boost_20260422_173931",
+    "perf_boost_20260422_195511"
+  ]
 }
