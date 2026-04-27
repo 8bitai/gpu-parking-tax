@@ -6,52 +6,54 @@ Companion repository for *"The Model Parking Tax: Quantifying the Hidden Energy 
 
 This paper presents the first cross-architecture measurement of idle GPU power as a function of VRAM allocation. We combine 18 days of production telemetry (335,267 samples, 14 H100 GPUs) with controlled dose-response experiments on three GPU architectures: NVIDIA H100 (HBM3), A100 (HBM2e), and L40S (GDDR6).
 
-**Key finding:** Idle GPU power is *piecewise constant* across all three architectures. The CUDA context forces a discrete DVFS transition (+26--66 W), while the marginal VRAM effect is bounded below measurement relevance (|beta| < 0.02 W/GB). The CUDA context accounts for >98% of the parking tax regardless of memory technology.
+**Key finding:** Idle GPU power is *piecewise constant* across all three architectures. The CUDA context forces a discrete DVFS transition (+26--66 W), while the marginal VRAM effect is bounded below measurement relevance (|beta| < 0.02 W/GB). NVIDIA's `CUDA_DISABLE_PERF_BOOST` flag eliminates the parking tax within measurement noise on both Hopper and Ampere. On a 4xH100 node, the tax multiplies linearly at ~52 W/GPU across TP, DP, and mixed configurations.
 
 ## Repository Structure
 
 ```
-paper/                                  LaTeX source and figures
-  parking_tax.tex                       arXiv v1 paper
-  hotcarbon.tex                         HotCarbon 2026 workshop version (v2)
-  cross_architecture_dose_response.png  Figure 1: three GPUs, dose-response curves
-  parking_tax_decomposition.png         Figure 2: base/context/VRAM bar chart
-  vram_regression_detail.png            Figure 3: zoomed regression per GPU
+paper/
+  parking_tax.tex                       Paper source (HotCarbon 2026)
+  *.png                                 Generated figures
 
-scraper/                                Phase 1: production telemetry collection
-  scrape.py                             DCGM metric collection daemon (Prometheus)
-  preprocess.py                         Raw CSV to Parquet pipeline
-  workload_classifier.py                K8s metadata to workload labels
-  config.yaml                           Metric definitions and classification rules
-  validate.py                           Data validation checks
-  quick_test.py                         Scraper connectivity test
-
-experiments/                            Phase 2: controlled experiments
+experiments/                            Experiment runner scripts
   dose_response.py                      VRAM dose-response (auto-detects GPU arch)
-  model_validation.py                   Real model validation (Qwen2.5-7B on all GPUs)
-  perf_boost.py                         CUDA_DISABLE_PERF_BOOST evaluation (v2)
-  scheduler_simulation.py               Breakeven scheduler simulation (Section 6)
+  model_validation.py                   Real model validation (Qwen2.5-7B)
+  perf_boost.py                         CUDA_DISABLE_PERF_BOOST evaluation
+  multi_gpu.py                          Multi-GPU TP/DP scaling (4xH100)
+  latency_retest.py                     Focused latency retest protocol
+  scheduler_simulation.py               Breakeven scheduler simulation
+  utils.py                              Shared helpers (nvidia-smi, vLLM lifecycle)
 
 analysis/                               Analysis and figure generation
   phase1_telemetry.py                   Phase 1 production telemetry analysis
   phase2_controlled.py                  Phase 2 controlled experiment analysis
-  generate_paper_figures.py             Generate all three paper figures
+  generate_paper_figures.py             Phase 2 dose-response figures
+  generate_perf_boost_figures.py        Perf-boost power/latency figures
+  generate_multi_gpu_figures.py         Multi-GPU scaling figures
+  sensitivity_analysis.py              Industry-scale sensitivity analysis
   supplementary_figures.py              Phase 1 supplementary figures
-  sensitivity_analysis.py               Industry-scale sensitivity analysis
   results/                              Precomputed results (JSON, CSV)
 
 data/
-  telemetry/                            Phase 1 raw CSVs (not included, see below)
-  experiments/                          Phase 2 experiment data
-    h100_dose_response.jsonl            H100 canonical run (paper)
-    a100_dose_response.jsonl            A100 canonical run (paper)
-    l40s_dose_response.jsonl            L40S canonical run (paper)
-    h100_quick_test.jsonl               H100 quick validation
-    a100_exploratory.jsonl              A100 earlier run
-    l40s_exploratory.jsonl              L40S earlier run
+  telemetry/                            Phase 1 raw CSVs (18 days, 14 H100s)
+  raw/                                  Experiment data (JSONL)
+    h100_dose_response.jsonl            H100 dose-response (paper)
+    a100_dose_response.jsonl            A100 dose-response (paper)
+    l40s_dose_response.jsonl            L40S dose-response (paper)
     h100_model_validation.jsonl         Qwen2.5-7B idle power validation
     h100_cold_start_traces.jsonl        Cold-start power traces (1 Hz)
-    h100_validation_manifest.json       Validation experiment metadata
+    perf_boost_h100_sxm.jsonl           Flag evaluation, H100 SXM
+    perf_boost_a100_sxm4.jsonl          Flag evaluation, A100 SXM4
+    latency_retest_h100_sxm.json        Latency retest, H100
+    latency_retest_a100_sxm4.json       Latency retest, A100
+    multi_gpu.jsonl                     4xH100 TP/DP scaling experiment
+
+scraper/                                Phase 1: production telemetry collection
+  scrape.py                             DCGM metric collection daemon (Prometheus)
+  preprocess.py                         Raw CSV pipeline
+  workload_classifier.py                K8s metadata to workload labels
+  config.yaml                           Metric definitions and classification rules
+  validate.py                           Data validation checks
 ```
 
 ## Reproducing Results
@@ -71,11 +73,11 @@ cp .env.example .env  # only needed for scraper
 
 ### Running Analysis
 
-The analysis scripts operate on data in `data/experiments/` (Phase 2) and `analysis/results/` (precomputed Phase 1 results):
-
 ```bash
 # Regenerate all paper figures
 uv run python analysis/generate_paper_figures.py
+uv run python analysis/generate_perf_boost_figures.py
+uv run python analysis/generate_multi_gpu_figures.py
 
 # Phase 2 analysis (controlled experiments)
 uv run python analysis/phase2_controlled.py
@@ -86,38 +88,23 @@ uv run python analysis/sensitivity_analysis.py
 
 ### Running Experiments (requires GPU access)
 
-The dose-response script auto-detects GPU architecture and selects appropriate VRAM levels:
-
 ```bash
-# Quick test (~45 min, 5 VRAM levels)
+# Dose-response (auto-detects GPU, ~3.5 hours full / ~45 min quick)
+uv run python experiments/dose_response.py --gpu 0
 uv run python experiments/dose_response.py --gpu 0 --quick
 
-# Full experiment (~3.5 hours, 8+ VRAM levels, 20 min per phase)
-uv run python experiments/dose_response.py --gpu 0
-
-# Custom VRAM levels
-uv run python experiments/dose_response.py --gpu 0 --levels 0,8,32,64
-```
-
-Real model validation:
-
-```bash
-uv run python experiments/model_validation.py --gpu 0
-```
-
-CUDA\_DISABLE\_PERF\_BOOST evaluation (requires GPU + driver >= 580.105.08):
-
-```bash
-# Full experiment (baseline + flag + vLLM, ~3 hours)
+# CUDA_DISABLE_PERF_BOOST (requires driver >= 580.105.08)
 uv run python experiments/perf_boost.py --gpu 0
 
-# Quick mode, skip vLLM (~1 hour)
-uv run python experiments/perf_boost.py --gpu 0 --quick --skip-vllm
-```
+# Multi-GPU (requires 4xH100 SXM with NVLink)
+uv run python experiments/multi_gpu.py          # full (~6.5 hours)
+uv run python experiments/multi_gpu.py --quick  # quick (~3.5 hours)
+uv run python experiments/multi_gpu.py --smoke-test
 
-Scheduler simulation (no GPU needed):
+# Real model validation
+uv run python experiments/model_validation.py --gpu 0
 
-```bash
+# Scheduler simulation (no GPU needed)
 uv run python experiments/scheduler_simulation.py
 ```
 
@@ -131,7 +118,7 @@ uv run python scraper/preprocess.py
 
 ## Phase 1 Telemetry Data
 
-The raw Phase 1 telemetry (18 days, 335,267 idle samples from 14 H100 GPUs) totals ~6.8 GB of daily CSV files and is not included in this repository. The precomputed Phase 1 results in `analysis/results/phase1_results.json` contain all statistics reported in the paper. Contact the authors if you need access to the raw telemetry.
+The raw Phase 1 telemetry (18 days, 335,267 idle samples from 14 H100 GPUs) totals ~6.8 GB of daily CSV files. The precomputed Phase 1 results in `analysis/results/phase1_results.json` contain all statistics reported in the paper. Contact the authors for raw telemetry access.
 
 ## License
 
