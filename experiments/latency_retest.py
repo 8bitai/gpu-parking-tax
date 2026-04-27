@@ -32,7 +32,7 @@ VLLM_PORT = 8193
 IDLE_SOAK_S = 60       # seconds to idle before cold burst
 N_COLD = 5             # requests in the cold burst
 N_WARM = 50            # requests in the warm burst
-OUTPUT_DIR = Path("data/experiments")
+OUTPUT_DIR = Path("data/raw")
 
 
 def log(msg):

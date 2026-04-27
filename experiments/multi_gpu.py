@@ -52,9 +52,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Add parent directory to path for _common imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common.utils import (
+from utils import (
     now_utc, log, setup_hf_cache,
     query_nvidia_smi, check_driver_version,
     write_record, summarize_samples, mean_power, std_power, percentile,
@@ -1338,7 +1336,7 @@ def main():
         help=f"nvidia-smi sample interval in seconds (default: {SAMPLE_INTERVAL})")
     parser.add_argument(
         "--output-dir", type=str,
-        default="data/experiments/multi_gpu",
+        default="data/raw/multi_gpu",
         help="Output directory for JSONL and manifest")
     parser.add_argument(
         "--hf-cache", type=str, default=None, metavar="DIR",

@@ -277,7 +277,7 @@ def main():
         output_path = args.output
     else:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = f"data/experiments/{gpu_type.lower()}_dose_response_{ts}.jsonl"
+        output_path = f"data/raw/{gpu_type.lower()}_dose_response_{ts}.jsonl"
 
     log(f"VRAM levels: {vram_levels}")
     log(f"Phase duration: {phase_duration}s")

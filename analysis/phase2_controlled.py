@@ -8,7 +8,7 @@ and generates the definitive figures for the paper.
 
 Usage:
     # Analyze a single experiment run
-    python phase2_controlled.py --experiment data/experiments/h100_dose_response.jsonl
+    python phase2_controlled.py --experiment data/raw/h100_dose_response.jsonl
 
     # Analyze all experiment runs
     python phase2_controlled.py --all
@@ -93,7 +93,7 @@ def load_experiment(exp_dir: Path) -> tuple[pd.DataFrame, dict]:
 
 def load_all_experiments() -> list[tuple[pd.DataFrame, dict, Path]]:
     """Load all experiment runs."""
-    exp_base = Path("data/experiments")
+    exp_base = Path("data/raw")
     experiments = []
     for exp_dir in sorted(exp_base.glob("phase2_*")):
         if (exp_dir / "manifest.json").exists():
@@ -552,7 +552,7 @@ def main():
     if args.all:
         experiments = load_all_experiments()
         if not experiments:
-            print("No experiments found in data/experiments/")
+            print("No experiments found in data/raw/")
             print("Run the experiment first:")
             print("  python experiments/run_phase2.py --gpu 0 --phase-duration 1200")
             return
@@ -604,7 +604,7 @@ def main():
             print("No experiments found. Run the experiment first:")
             print("  python experiments/dose_response.py --gpu 0")
             print("\nOr specify an experiment file:")
-            print("  python analysis/phase2_controlled.py --experiment data/experiments/h100_dose_response.jsonl")
+            print("  python analysis/phase2_controlled.py --experiment data/raw/h100_dose_response.jsonl")
 
 
 if __name__ == "__main__":

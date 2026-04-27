@@ -710,7 +710,7 @@ def main():
     parser.add_argument("--interval", type=int, default=30,
                         help="Sample interval in seconds (default: 30)")
     parser.add_argument("--output-dir", type=str,
-                        default="data/experiments/perf_boost",
+                        default="data/raw/perf_boost",
                         help="Output directory")
     parser.add_argument(
         "--hf-cache",

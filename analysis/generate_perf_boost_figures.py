@@ -3,8 +3,8 @@
 Generate CUDA_DISABLE_PERF_BOOST figures for the paper.
 
 Data files:
-  - H100 SXM: data/experiments/perf_boost_h100_sxm.jsonl
-  - A100 SXM4: data/experiments/perf_boost_a100_sxm4.jsonl
+  - H100 SXM: data/raw/perf_boost_h100_sxm.jsonl
+  - A100 SXM4: data/raw/perf_boost_a100_sxm4.jsonl
 
 Produces:
   1. perf_boost_power_comparison.png — grouped bar chart of idle power
@@ -51,8 +51,8 @@ GPU_COLORS = {
 }
 
 DATA_FILES = {
-    "H100 SXM": "data/experiments/perf_boost_h100_sxm.jsonl",
-    "A100 SXM4": "data/experiments/perf_boost_a100_sxm4.jsonl",
+    "H100 SXM": "data/raw/perf_boost_h100_sxm.jsonl",
+    "A100 SXM4": "data/raw/perf_boost_a100_sxm4.jsonl",
 }
 
 # Condition display order and labels
@@ -194,8 +194,8 @@ def perf_boost_power_comparison():
 
 
 LATENCY_RETEST_FILES = {
-    "H100 SXM": "data/experiments/latency_retest_20260424_104808.json",
-    "A100 SXM4": "data/experiments/latency_retest_20260424_111639.json",
+    "H100 SXM": "data/raw/latency_retest_h100_sxm.json",
+    "A100 SXM4": "data/raw/latency_retest_a100_sxm4.json",
 }
 
 

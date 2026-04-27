@@ -42,9 +42,9 @@ FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Canonical experiment files (n=40 per phase, 20-min recording)
 DATA_FILES = {
-    "H100 (HBM3)": "data/experiments/h100_dose_response.jsonl",
-    "A100 (HBM2e)": "data/experiments/a100_dose_response.jsonl",
-    "L40S (GDDR6)": "data/experiments/l40s_dose_response.jsonl",
+    "H100 (HBM3)": "data/raw/h100_dose_response.jsonl",
+    "A100 (HBM2e)": "data/raw/a100_dose_response.jsonl",
+    "L40S (GDDR6)": "data/raw/l40s_dose_response.jsonl",
 }
 
 GPU_COLORS = {
