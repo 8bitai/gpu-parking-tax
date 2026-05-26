@@ -1,6 +1,8 @@
 # The Model Parking Tax
 
-Companion repository for *"The Model Parking Tax: Quantifying the Hidden Energy Cost of Always-On GPU Model Deployment"*.
+[![arXiv](https://img.shields.io/badge/arXiv-2605.23918-b31b1b.svg)](https://arxiv.org/abs/2605.23918)
+
+Companion repository for *"The Model Parking Tax: Quantifying the Hidden Energy Cost of Always-On GPU Model Deployment"* ([arXiv:2605.23918](https://arxiv.org/abs/2605.23918)).
 
 ## Overview
 
@@ -119,6 +121,19 @@ uv run python scraper/preprocess.py
 ## Phase 1 Telemetry Data
 
 The raw Phase 1 telemetry (18 days, 335,267 idle samples from 14 H100 GPUs) totals ~6.8 GB of daily CSV files. The precomputed Phase 1 results in `analysis/results/phase1_results.json` contain all statistics reported in the paper. Contact the authors for raw telemetry access.
+
+## Citation
+
+If you use this work, please cite:
+
+```bibtex
+@article{vadari2026parkingtax,
+  title={The Model Parking Tax: Quantifying the Hidden Energy Cost of Always-On GPU Model Deployment},
+  author={Vadari, Sai Sathvik},
+  journal={arXiv preprint arXiv:2605.23918},
+  year={2026}
+}
+```
 
 ## License
 
