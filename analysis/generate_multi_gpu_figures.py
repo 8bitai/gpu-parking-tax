@@ -37,12 +37,12 @@ C_BASE_IDLE = "#94a3b8"  # gray from v1
 plt.rcParams.update({
     "font.family": "serif",
     "font.serif": ["Times New Roman", "DejaVu Serif"],
-    "font.size": 10,
-    "axes.titlesize": 11,
-    "axes.labelsize": 10,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
-    "legend.fontsize": 8,
+    "font.size": 16,
+    "axes.titlesize": 17,
+    "axes.labelsize": 16,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "legend.fontsize": 13,
     "figure.dpi": 300,
     "savefig.dpi": 300,
     "savefig.bbox": "tight",
@@ -177,7 +177,7 @@ def plot_parking_tax_bars(records):
             "n_gpus": len(gpu_ids),
         }
 
-    fig, ax = plt.subplots(figsize=(8, 4))
+    fig, ax = plt.subplots(figsize=(7, 3.9))
 
     n_groups = len(pairs)
     bar_width = 0.35
@@ -201,39 +201,42 @@ def plot_parking_tax_bars(records):
 
         # Value labels
         ax.text(x_base, base["mean"] + base["std"] + 1.5, f'{base["mean"]:.1f}W',
-                ha="center", fontsize=7.5, fontweight="bold")
+                ha="center", fontsize=11, fontweight="bold")
         ax.text(x_flag, flag["mean"] + flag["std"] + 1.5, f'{flag["mean"]:.1f}W',
-                ha="center", fontsize=7.5, fontweight="bold")
+                ha="center", fontsize=11, fontweight="bold")
 
-        # Tax annotation with arrow between bars
+        # Tax label placed inside the baseline bar, centered in the region
+        # above the bare-idle line that it represents -- clear of the top
+        # value label and of the neighbouring flag-on bar.
         tax = base["mean"] - BARE_IDLE_W
-        mid_x = group_centers[i]
-        ax.annotate(f"−{tax:.0f}W", xy=(mid_x, base["mean"] - 5),
-                    fontsize=8, color=C_BARE, fontweight="bold", ha="center",
-                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=C_BARE,
-                              alpha=0.8))
+        ax.text(x_base, (BARE_IDLE_W + base["mean"]) / 2.0, f"$-${tax:.0f}W",
+                ha="center", va="center", fontsize=11, fontweight="bold",
+                color="red", zorder=8,
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="red",
+                          alpha=0.9))
 
     # Bare idle reference
     ax.axhline(BARE_IDLE_W, color=C_BARE, ls="--", lw=1.2, alpha=0.6)
     ax.text(group_centers[-1] + 0.7, BARE_IDLE_W + 1.5,
-            f"Bare idle ({BARE_IDLE_W}W)", fontsize=8, color=C_BARE, va="bottom")
+            f"Bare idle ({BARE_IDLE_W}W)", fontsize=12, color=C_BARE, va="bottom")
 
     # Group labels
     group_labels = [CONDITION_SHORT[p[0]] for p in pairs]
     ax.set_xticks(group_centers)
-    ax.set_xticklabels(group_labels, fontsize=10, fontweight="bold")
+    ax.set_xticklabels(group_labels, fontsize=13, fontweight="bold")
 
     # Legend
     legend_elements = [
         Patch(facecolor=C_BASELINE, edgecolor="black", label="Baseline (flag off)"),
         Patch(facecolor=C_FLAG_ON, edgecolor="black", hatch="//", label="Flag on (PERF_BOOST disabled)"),
     ]
-    ax.legend(handles=legend_elements, loc="upper right", framealpha=0.9)
+    ax.legend(handles=legend_elements, loc="upper center", ncol=2,
+              framealpha=0.9, fontsize=11)
 
     ax.set_ylabel("Per-GPU Idle Power (W)")
-    ax.set_ylim(0, 150)
-    ax.set_title("Multi-GPU Parking Tax Across Parallelism Strategies (4×H100 SXM)",
-                 fontsize=11, fontweight="bold", pad=10)
+    ax.set_ylim(0, 170)
+    ax.set_title("Multi-GPU Parking Tax (4×H100 SXM)",
+                 fontsize=16, fontweight="bold", pad=10)
 
     out = OUT_DIR / "multi_gpu_parking_tax.png"
     fig.savefig(out)

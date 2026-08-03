@@ -21,12 +21,12 @@ import matplotlib.pyplot as plt
 plt.rcParams.update({
     "font.family": "serif",
     "font.serif": ["Times New Roman", "DejaVu Serif"],
-    "font.size": 10,
-    "axes.titlesize": 11,
-    "axes.labelsize": 10,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
-    "legend.fontsize": 8,
+    "font.size": 15,
+    "axes.titlesize": 17,
+    "axes.labelsize": 15,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
+    "legend.fontsize": 12,
     "figure.dpi": 300,
     "savefig.dpi": 300,
     "savefig.bbox": "tight",
@@ -148,7 +148,7 @@ def cross_architecture_dose_response():
             overhead = ctx_power - bp_power
             mid_y = (bp_power + ctx_power) / 2
             ax.annotate(f"+{overhead:.1f}W\nDVFS step",
-                       xy=(2, mid_y), fontsize=8, fontweight="bold",
+                       xy=(2, mid_y), fontsize=12, fontweight="bold",
                        ha="left", va="center", color=color,
                        bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
                                 edgecolor=color, alpha=0.9))
@@ -156,7 +156,7 @@ def cross_architecture_dose_response():
         ax.set_xlabel("VRAM Allocation (GB)")
         ax.set_ylabel("Idle Power (W)")
         ax.set_title(gpu_label, fontweight="bold")
-        ax.legend(fontsize=7, loc="center right")
+        ax.legend(fontsize=11, loc="center right")
 
         # Set y-axis to show both bare and CUDA with context
         if len(bare) > 0:
@@ -165,7 +165,7 @@ def cross_architecture_dose_response():
             ax.set_ylim(y_min, y_max)
 
     fig.suptitle("The Model Parking Tax: Cross-Architecture Dose-Response",
-                fontweight="bold", fontsize=12, y=1.03)
+                fontweight="bold", fontsize=17, y=1.03)
     plt.tight_layout()
     for ext in ["pdf", "png"]:
         fig.savefig(FIGURES_DIR / f"cross_architecture_dose_response.{ext}")
@@ -226,17 +226,17 @@ def parking_tax_decomposition():
     for i, (b, c, v, label) in enumerate(zip(base_vals, context_vals, vram_vals, gpu_labels)):
         total = b + c + v
         ax.text(i, total + 2, f"{total:.0f}W total", ha="center",
-                fontsize=9, fontweight="bold")
+                fontsize=13, fontweight="bold")
         ax.text(i, b + c/2, f"+{c:.1f}W",
-                ha="center", va="center", fontsize=8, color="white",
+                ha="center", va="center", fontsize=12, color="white",
                 fontweight="bold")
 
     ax.set_xticks(x)
-    ax.set_xticklabels(gpu_labels, fontsize=9)
+    ax.set_xticklabels(gpu_labels, fontsize=13)
     ax.set_ylabel("Idle Power (W)")
     ax.set_title("Parking Tax Decomposition: CUDA Context Dominates on All Architectures",
                 fontweight="bold")
-    ax.legend(fontsize=8, loc="upper center")
+    ax.legend(fontsize=12, loc="upper center")
 
     plt.tight_layout()
     for ext in ["pdf", "png"]:
@@ -286,7 +286,7 @@ def vram_regression_detail():
                f"95% CI: [{reg['slope']-1.96*reg['se']:.4f}, {reg['slope']+1.96*reg['se']:.4f}]\n"
                f"R² = {reg['r_squared']:.4f}\n"
                f"{p_str}",
-               transform=ax.transAxes, fontsize=7, va="top", ha="right",
+               transform=ax.transAxes, fontsize=11, va="top", ha="right",
                bbox=dict(boxstyle="round,pad=0.4", facecolor="white",
                         edgecolor=color, alpha=0.9))
 
@@ -296,7 +296,7 @@ def vram_regression_detail():
         ax.set_ylim(mean_power - 2.5, mean_power + 2.5)
 
     fig.suptitle("VRAM Dose-Response Detail (CUDA-Active Only, Zoomed ±2.5W)",
-                fontweight="bold", fontsize=12, y=1.03)
+                fontweight="bold", fontsize=17, y=1.03)
     plt.tight_layout()
     for ext in ["pdf", "png"]:
         fig.savefig(FIGURES_DIR / f"vram_regression_detail.{ext}")

@@ -47,12 +47,13 @@ The default operating model for AI inference is to deploy models to GPUs and kee
 
 The 2024 US Data Center Energy Usage Report estimates GPU idle power at $\sim$20\% of Thermal Design Power (TDP)~\cite{doe-report}. Patel et al.~\cite{patel-cal23} showed that CUDA contexts on A100 GPUs force higher clock frequencies even when idle. Concurrent work by Lei et al.~\cite{lei-idle} characterizes the prevalence of ``execution-idle'' at cluster scale---19.7\% of in-execution time and 10.7\% of energy across 756~GPUs over 31~days---but does not decompose idle power into its component causes. No prior study has measured the marginal energy cost \emph{per GB of VRAM allocation}---the quantity needed for rational keep-warm decisions---nor tested whether the result generalizes across GPU architectures and memory technologies. Moreover, modern LLM serving routinely distributes models across multiple GPUs via tensor parallelism (TP), data parallelism (DP), or both. If the parking tax multiplies linearly with~$N$, a single 4-GPU node wastes ${\sim}215$\,W idle; an 8-GPU node wastes ${\sim}430$\,W. At cluster scale with thousands of GPUs, even modest idle fractions translate to kilowatts of waste. Yet no study has measured whether the tax compounds, remains constant, or interacts with inter-GPU communication (NCCL).
 
-This paper fills that gap. We ask: \textbf{does storing model weights in GPU VRAM incur a measurable marginal idle energy cost, and is the answer architecture-dependent?} We answer with three complementary studies:
+This paper fills that gap. We ask: \textbf{does storing model weights in GPU VRAM incur a measurable marginal idle energy cost, and is the answer architecture-dependent?} We answer with four complementary studies:
 
 \begin{enumerate}
     \item \textbf{Production telemetry} (Phase~1): \num{335267} idle-state samples from 14~H100 GPUs across 2~nodes over 18~days, with VRAM allocations spanning 3\,MB to 79\,GB.
     \item \textbf{Controlled experiments} (Phase~2): Within-subject dose-response studies on three GPU architectures---H100 (HBM3), A100 (HBM2e), and L40S (GDDR6)---systematically varying VRAM from 0 to 40--72\,GB, validated with real HuggingFace model weights.
-    \item \textbf{Multi-GPU scaling} (Phase~3): 9~conditions on a 4$\times$H100~SXM node testing TP=2, TP=4, DP=2, and TP=2$\times$DP=2 with and without \perfboost, measuring idle power, warm latency, DVFS decay, and cold-start ramp per parallelism strategy.
+    \item \textbf{Vendor mitigation} (Phase~3): Evaluation of NVIDIA's \perfboost driver flag on H100 (Hopper) and A100 (Ampere), measuring idle power elimination, steady-state latency, and first-request DVFS ramp under both synthetic and vLLM workloads.
+    \item \textbf{Multi-GPU scaling} (Phase~4): 9~conditions on a 4$\times$H100~SXM node testing TP=2, TP=4, DP=2, and TP=2$\times$DP=2 with and without \perfboost, measuring idle power, warm latency, DVFS decay, and cold-start ramp per parallelism strategy.
 \end{enumerate}
 
 Our central finding is that idle GPU power is \emph{piecewise constant} across all three architectures. We model idle power as:
@@ -157,7 +158,20 @@ The noisiest GPU (L40S, GDDR6) has $\sigma < 1.5$\,W; the cleanest (A100, HBM2e)
 \end{equation}
 This converts our measurement limitation into a \emph{result constraint}. Regarding Burtscher et al.'s~\cite{burtscher-power} finding that \texttt{nvidia-smi} undersamples: our within-phase standard deviations confirm idle power is stable enough that subsampling does not bias means. Complementary per-instruction energy models such as Wattchmen~\cite{wattchmen} achieve finer-grained decomposition; extending our idle-state analysis with such methods is a promising direction.
 
-\subsection{Phase~3: Multi-GPU Experimental Setup}
+\subsection{Phase~3: Vendor Mitigation Setup}
+\label{sec:perf-boost-setup}
+
+NVIDIA added the \perfboost environment variable in the 580 driver series (CUDA Toolkit 13.2, late 2025; publicly noted at driver 580.105.08), intended to prevent the idle-context clock boosting behavior documented by Patel et al.~\cite{patel-cal23} and confirmed in our Phase~1 and Phase~2 results. We evaluate its effectiveness on H100 80GB SXM (Hopper, driver 580.126.09) and A100 80GB SXM4 (Ampere, driver 580.126.16) under three conditions:
+
+\begin{enumerate}
+    \item \textbf{Baseline}: CUDA context + \texttt{torch.empty} 16\,GB, default driver behavior.
+    \item \textbf{Flag on}: Same as (1) with \perfboost\texttt{=1} in the process environment.
+    \item \textbf{Flag + vLLM}: vLLM serving Qwen2.5-7B~\cite{qwen2} in fp16, measuring idle power between requests with the flag on vs.\ off.
+\end{enumerate}
+
+Each condition follows the Phase~2 protocol: stabilize 60\,s, record \texttt{nvidia-smi} every 30\,s for the recording phase. For the vLLM conditions, we additionally measure request latency (p50, p95, p99) to detect performance regressions introduced by the flag.
+
+\subsection{Phase~4: Multi-GPU Experimental Setup}
 \label{sec:multi-gpu-setup}
 
 To test whether the parking tax scales with the number of GPUs and interacts with inter-GPU communication, we conducted a within-subject experiment on a single 4$\times$H100 80GB SXM node connected via NVLink (driver 580.126.09). We tested 9~conditions (Table~\ref{tab:multi-gpu-conditions}) using Qwen2.5-7B (fp16) served by vLLM, following the same measurement protocol as Phase~2.
@@ -337,18 +351,10 @@ Run:ai Streamer (8B) & 200 & 5 & 20\,s \\
 
 \paragraph{A third option.} The breakeven analysis assumes a binary keep-warm-or-evict decision. But a third option exists: keep the model loaded while eliminating the parking tax at the driver level, paying only a transient ramp cost per idle-to-active transition instead of a full cold start. We evaluate this next.
 
-\subsection{Vendor Mitigation: CUDA\_DISABLE\_PERF\_BOOST}
+\subsection{Phase~3: Vendor Mitigation}
 \label{sec:perf-boost}
 
-NVIDIA shipped the \perfboost environment variable in driver 580.105.08 (November 2025), intended to prevent the idle-context clock boosting behavior we measure. This is the most direct vendor-provided mechanism targeting the DVFS anomaly documented in \S\ref{sec:measurement} and by Patel et al.~\cite{patel-cal23}. We evaluate its effectiveness on H100 80GB SXM (Hopper) and A100 80GB SXM (Ampere) under three conditions:
-
-\begin{enumerate}
-    \item \textbf{Baseline}: CUDA context + \texttt{torch.empty} 16\,GB, default driver behavior.
-    \item \textbf{Flag on}: Same as (a) with \perfboost\texttt{=1} in the process environment.
-    \item \textbf{Flag + vLLM}: vLLM serving Qwen2.5-7B~\cite{qwen2} in fp16, measuring idle power between requests with the flag on vs.\ off.
-\end{enumerate}
-
-Each condition follows the Phase~2 protocol: stabilize 60\,s, record \texttt{nvidia-smi} every 30\,s for the recording phase. For the vLLM conditions, we additionally measure request latency (p50, p95, p99) to detect performance regressions introduced by the flag.
+NVIDIA's \perfboost environment variable (added in the 580 driver series; tested at $\geq$580.105.08, November 2025) is the most direct vendor-provided mechanism targeting the DVFS anomaly. Using the experimental protocol described in \S\ref{sec:perf-boost-setup}, we evaluate its effectiveness on H100 (Hopper) and A100 (Ampere).
 
 \begin{table}[t]
 \caption{Effect of \perfboost on idle-with-context power. Each cell: mean $\pm$ std ($n=40$, 20-min phases). H100 SXM: driver 580.126.09; A100 SXM4: driver 580.126.16.}
@@ -448,7 +454,7 @@ This reframes the breakeven model (\S4.4): instead of choosing between keep-warm
     \label{fig:perf-boost-latency}
 \end{figure}
 
-\subsection{Multi-GPU Scaling}
+\subsection{Phase~4: Multi-GPU Scaling}
 \label{sec:multi-gpu}
 
 We extend the single-GPU findings to multi-GPU deployments, testing whether the parking tax compounds under tensor parallelism, data parallelism, and mixed configurations on a 4$\times$H100~SXM node (\S\ref{sec:multi-gpu-setup}).
@@ -572,7 +578,7 @@ The plausible range spans 92--1{,}745\,GWh/year, with the base case at 462\,GWh/
 \label{sec:scheduler}
 % ===========================================================================
 
-\emph{Note:} The \perfboost flag (\S\ref{sec:perf-boost}) is the preferred mitigation when available (driver $\geq$580.105.08, NVIDIA GPUs). The breakeven scheduler below is a \textbf{fallback} for deployments without flag access---older drivers, non-NVIDIA hardware, or environments where the flag cannot be set.
+\emph{Note:} The \perfboost flag (\S\ref{sec:perf-boost}) is the preferred mitigation when available (NVIDIA GPUs, driver in the 580 series; tested at $\geq$580.105.08). The breakeven scheduler below is a \textbf{fallback} for deployments without flag access---older drivers, non-NVIDIA hardware, or environments where the flag cannot be set.
 
 To demonstrate the practical utility of the breakeven model, we implement a proof-of-concept scheduler that uses $T^*$ (Equation~\ref{eq:breakeven}) to make keep-warm/evict decisions. We compare three policies over 24-hour simulations:
 

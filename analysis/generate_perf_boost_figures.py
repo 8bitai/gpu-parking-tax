@@ -25,12 +25,12 @@ import matplotlib.pyplot as plt
 plt.rcParams.update({
     "font.family": "serif",
     "font.serif": ["Times New Roman", "DejaVu Serif"],
-    "font.size": 10,
-    "axes.titlesize": 11,
-    "axes.labelsize": 10,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
-    "legend.fontsize": 8,
+    "font.size": 15,
+    "axes.titlesize": 17,
+    "axes.labelsize": 15,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
+    "legend.fontsize": 12,
     "figure.dpi": 300,
     "savefig.dpi": 300,
     "savefig.bbox": "tight",
@@ -145,39 +145,35 @@ def perf_boost_power_comparison():
         # Annotate power values
         for i, (m, s) in enumerate(zip(means, stds)):
             ax.text(i, m + s + 1.5, f"{m:.1f}W", ha="center", va="bottom",
-                    fontsize=8, fontweight="bold")
+                    fontsize=12, fontweight="bold")
 
-        # Annotate savings arrows
-        if "baseline" in stats and "flag_on" in stats:
-            baseline_idx = conds.index("baseline")
-            flag_idx = conds.index("flag_on")
-            diff = stats["baseline"]["mean"] - stats["flag_on"]["mean"]
-            mid_y = (stats["baseline"]["mean"] + stats["flag_on"]["mean"]) / 2
-            ax.annotate("", xy=(flag_idx, stats["flag_on"]["mean"] + stds[flag_idx] + 3),
-                       xytext=(baseline_idx, stats["baseline"]["mean"] - 2),
-                       arrowprops=dict(arrowstyle="->", color="red", lw=1.5))
-            ax.text((baseline_idx + flag_idx) / 2, mid_y,
-                    f"$-${diff:.0f}W", ha="center", va="center", fontsize=9,
-                    fontweight="bold", color="red",
-                    bbox=dict(boxstyle="round,pad=0.2", facecolor="white",
-                             edgecolor="red", alpha=0.9))
+        # Savings annotation: a vertical double-headed arrow placed in the
+        # empty gap *between* each default/flag pair (bars sit at integer x, so
+        # the midpoint is clear of both bars and their top value labels). The
+        # magnitude label is boxed on the arrow.
+        def _savings(base_key, flag_key):
+            if base_key not in stats or flag_key not in stats:
+                return
+            bi, fi = conds.index(base_key), conds.index(flag_key)
+            d, f = stats[base_key]["mean"], stats[flag_key]["mean"]
+            xmid = (bi + fi) / 2.0
+            # Arrow spans the drop in the clear gap between the pair; the
+            # magnitude label sits INSIDE the (shorter) flag-on bar, which is
+            # always clear of the top value labels regardless of drop size.
+            ax.annotate("", xy=(xmid, f), xytext=(xmid, d),
+                        arrowprops=dict(arrowstyle="<->", color="red", lw=1.8),
+                        zorder=7)
+            ax.text(fi, f * 0.5, f"$-${d - f:.0f}W",
+                    ha="center", va="center", fontsize=12, fontweight="bold",
+                    color="red", zorder=8,
+                    bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
+                              edgecolor="red", alpha=0.95))
 
-        if "vllm_baseline" in stats and "vllm_flag_on" in stats:
-            vb_idx = conds.index("vllm_baseline")
-            vf_idx = conds.index("vllm_flag_on")
-            diff = stats["vllm_baseline"]["mean"] - stats["vllm_flag_on"]["mean"]
-            mid_y = (stats["vllm_baseline"]["mean"] + stats["vllm_flag_on"]["mean"]) / 2
-            ax.annotate("", xy=(vf_idx, stats["vllm_flag_on"]["mean"] + stds[vf_idx] + 3),
-                       xytext=(vb_idx, stats["vllm_baseline"]["mean"] - 2),
-                       arrowprops=dict(arrowstyle="->", color="red", lw=1.5))
-            ax.text((vb_idx + vf_idx) / 2, mid_y,
-                    f"$-${diff:.0f}W", ha="center", va="center", fontsize=9,
-                    fontweight="bold", color="red",
-                    bbox=dict(boxstyle="round,pad=0.2", facecolor="white",
-                             edgecolor="red", alpha=0.9))
+        _savings("baseline", "flag_on")
+        _savings("vllm_baseline", "vllm_flag_on")
 
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, fontsize=8)
+        ax.set_xticklabels(labels, fontsize=11)
         ax.set_ylabel("Idle Power (W)")
         ax.set_title(gpu_label, fontweight="bold")
 
@@ -185,7 +181,7 @@ def perf_boost_power_comparison():
         ax.set_ylim(0, max(means) + 20)
 
     fig.suptitle("CUDA_DISABLE_PERF_BOOST: Idle Power Comparison",
-                fontweight="bold", fontsize=12, y=1.03)
+                fontweight="bold", fontsize=17, y=1.03)
     plt.tight_layout()
     fig.savefig(FIGURES_DIR / "perf_boost_power_comparison.png")
     fig.savefig(PAPER_DIR / "perf_boost_power_comparison.png")
