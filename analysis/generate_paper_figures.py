@@ -6,6 +6,7 @@ Data files (n=40 per phase, 20-min recording):
   - H100: h100_dose_response.jsonl
   - A100: a100_dose_response.jsonl
   - L40S: l40s_dose_response.jsonl
+  - B200: b200_dose_response.jsonl
 """
 
 import json
@@ -45,18 +46,21 @@ DATA_FILES = {
     "H100 (HBM3)": "data/raw/h100_dose_response.jsonl",
     "A100 (HBM2e)": "data/raw/a100_dose_response.jsonl",
     "L40S (GDDR6)": "data/raw/l40s_dose_response.jsonl",
+    "B200 (HBM3e)": "data/raw/b200_dose_response.jsonl",
 }
 
 GPU_COLORS = {
     "H100 (HBM3)": "#3b82f6",
     "A100 (HBM2e)": "#10b981",
     "L40S (GDDR6)": "#f59e0b",
+    "B200 (HBM3e)": "#8b5cf6",
 }
 
 GPU_MARKERS = {
     "H100 (HBM3)": "o",
     "A100 (HBM2e)": "s",
     "L40S (GDDR6)": "D",
+    "B200 (HBM3e)": "^",
 }
 
 
@@ -75,7 +79,7 @@ def load_experiment(filepath):
         phase_stats.append({
             "phase": phase,
             "target_vram_gb": g["target_vram_gb"].iloc[0],
-            "power_mean": g["power_w"].mean(),
+            "power_mean": g["power_w"].median(),  # median: robust to transient DVFS blips in short idle runs
             "power_std": g["power_w"].std(),
             "power_min": g["power_w"].min(),
             "power_max": g["power_w"].max(),
@@ -109,10 +113,10 @@ def load_experiment(filepath):
 
 
 def cross_architecture_dose_response():
-    """Three-panel dose-response: one panel per GPU, absolute power scale."""
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    """Four-panel dose-response: one panel per GPU, absolute power scale."""
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
 
-    for ax, (gpu_label, filepath) in zip(axes, DATA_FILES.items()):
+    for ax, (gpu_label, filepath) in zip(axes.flat, DATA_FILES.items()):
         data = load_experiment(filepath)
         bare = data["bare"]
         cuda = data["cuda"]
@@ -167,7 +171,7 @@ def cross_architecture_dose_response():
     fig.suptitle("The Model Parking Tax: Cross-Architecture Dose-Response",
                 fontweight="bold", fontsize=17, y=1.03)
     plt.tight_layout()
-    for ext in ["pdf", "png"]:
+    for ext in ["png"]:
         fig.savefig(FIGURES_DIR / f"cross_architecture_dose_response.{ext}")
         fig.savefig(PAPER_DIR / f"cross_architecture_dose_response.{ext}")
     plt.close(fig)
@@ -238,8 +242,13 @@ def parking_tax_decomposition():
                 fontweight="bold")
     ax.legend(fontsize=12, loc="upper center")
 
+    # Headroom so the tallest bar (B200, base ~197W -> ~256W total), its total
+    # label, and the upper-center legend all fit without clipping.
+    max_total = max((b + c + v) for b, c, v in zip(base_vals, context_vals, vram_vals))
+    ax.set_ylim(0, max_total * 1.18)
+
     plt.tight_layout()
-    for ext in ["pdf", "png"]:
+    for ext in ["png"]:
         fig.savefig(FIGURES_DIR / f"parking_tax_decomposition.{ext}")
         fig.savefig(PAPER_DIR / f"parking_tax_decomposition.{ext}")
     plt.close(fig)
@@ -248,9 +257,9 @@ def parking_tax_decomposition():
 
 def vram_regression_detail():
     """Zoomed regression: CUDA-active phases only, ±2.5W scale."""
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
 
-    for ax, (gpu_label, filepath) in zip(axes, DATA_FILES.items()):
+    for ax, (gpu_label, filepath) in zip(axes.flat, DATA_FILES.items()):
         data = load_experiment(filepath)
         cuda = data["cuda"]
         reg = data["regression"]
@@ -298,7 +307,7 @@ def vram_regression_detail():
     fig.suptitle("VRAM Dose-Response Detail (CUDA-Active Only, Zoomed ±2.5W)",
                 fontweight="bold", fontsize=17, y=1.03)
     plt.tight_layout()
-    for ext in ["pdf", "png"]:
+    for ext in ["png"]:
         fig.savefig(FIGURES_DIR / f"vram_regression_detail.{ext}")
         fig.savefig(PAPER_DIR / f"vram_regression_detail.{ext}")
     plt.close(fig)

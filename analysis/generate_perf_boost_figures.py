@@ -94,9 +94,11 @@ def compute_power_stats(power_rows):
         by_cond[r["condition"]].append(r["power_w"])
     stats = {}
     for cond, powers in by_cond.items():
+        med = float(np.median(powers))
+        tight = [p for p in powers if abs(p - med) < 3]  # settled samples, excl. transient DVFS boosts
         stats[cond] = {
-            "mean": np.mean(powers),
-            "std": np.std(powers, ddof=1) if len(powers) > 1 else 0,
+            "mean": med,  # median: robust to transient DVFS boosts (see paper methodology)
+            "std": np.std(tight, ddof=1) if len(tight) > 1 else 0,
             "n": len(powers),
             "values": powers,
         }

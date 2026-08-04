@@ -1,0 +1,63 @@
+{
+  "experiment": "throughput_flag_comparison",
+  "timestamp": "2026-08-04T05:21:44.586920+00:00",
+  "gpu": {
+    "timestamp": "2026-08-04T05:19:02.885236+00:00",
+    "gpu_name": "NVIDIA H100 80GB HBM3",
+    "mem_total_mb": 81559.0,
+    "mem_used_mb": 0.0,
+    "mem_free_mb": 81079.0,
+    "power_w": 69.86,
+    "power_limit_w": 700.0,
+    "gpu_temp_c": 29.0,
+    "mem_temp_c": 38.0,
+    "sm_clock_mhz": 345.0,
+    "mem_clock_mhz": 2619.0,
+    "uuid": "GPU-8377859e-7204-08d9-c1b2-5c522bc711ad",
+    "gpu_util_pct": 0.0,
+    "mem_util_pct": 0.0,
+    "pstate": "P0",
+    "driver_version": "580.126.09"
+  },
+  "model": "Qwen/Qwen2.5-7B",
+  "results": {
+    "baseline": {
+      "concurrency": 64,
+      "n_requests": 512,
+      "max_tokens": 256,
+      "completed": 512,
+      "failed": 0,
+      "wall_s": 14.114165544509888,
+      "total_output_tokens": 131072,
+      "throughput_tok_s": 9286.55679902977,
+      "request_throughput_s": 36.27561249621004,
+      "latency_mean_s": 1.7467464627698064,
+      "latency_p50_s": 1.7547149658203125,
+      "latency_p99_s": 1.8290627002716064,
+      "load_power_mean_w": 533.21,
+      "load_power_max_w": 573.74,
+      "load_sm_clock_mean_mhz": 1980.0,
+      "load_sm_clock_max_mhz": 1980.0,
+      "n_smi_samples": 7
+    },
+    "flag_on": {
+      "concurrency": 64,
+      "n_requests": 512,
+      "max_tokens": 256,
+      "completed": 512,
+      "failed": 0,
+      "wall_s": 14.010270833969116,
+      "total_output_tokens": 131072,
+      "throughput_tok_s": 9355.422286498886,
+      "request_throughput_s": 36.54461830663627,
+      "latency_mean_s": 1.7309814025647938,
+      "latency_p50_s": 1.7313284873962402,
+      "latency_p99_s": 1.7917797565460205,
+      "load_power_mean_w": 535.9471428571429,
+      "load_power_max_w": 570.74,
+      "load_sm_clock_mean_mhz": 1980.0,
+      "load_sm_clock_max_mhz": 1980.0,
+      "n_smi_samples": 7
+    }
+  }
+}

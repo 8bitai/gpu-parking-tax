@@ -32,7 +32,7 @@
 }
 
 \begin{abstract}
-The AI inference industry keeps models loaded in GPU memory around the clock to avoid cold-start latency, implicitly treating idle power as a fixed cost of readiness. Yet the structure of this cost has never been empirically decomposed---and never across GPU architectures. We combine 18~days of production telemetry (\num{335267} samples, 14~H100 GPUs) with controlled dose-response experiments on three architectures---H100 (HBM3), A100 (HBM2e), and L40S (GDDR6)---to isolate CUDA context as the idle-power lock variable. Idle power is \emph{piecewise constant}: the CUDA context forces a DVFS transition consuming $+26$--$66$\,W over bare idle, while the marginal VRAM effect is bounded below relevance ($|\beta| < 0.02$\,W/GB) on every device tested. Real model validation (Qwen2.5-7B) confirms $<$0.5\,W difference from empty tensors on all three GPUs. NVIDIA's \perfboost driver flag eliminates the parking tax within measurement noise on both Hopper ($-$55\,W) and Ampere ($-$10.6\,W of 11.1\,W overhead, 96\%) with no steady-state latency penalty under vLLM. On a 4$\times$H100~SXM node, the tax multiplies linearly at ${\sim}52$\,W per GPU across tensor parallelism, data parallelism, and mixed configurations---${\sim}52$\,W/GPU $\times$ 4 = 215\,W wasted on idle GPUs---while the cold-start penalty remains constant at ${\sim}150$\,ms regardless of GPU count. Setting the flag at process start is a near-zero-cost mitigation: the DVFS governor automatically drops clocks to bare idle within 2\,s of the last request and ramps on demand, with the only cost being a one-time ${\sim}150$\,ms first-request penalty that does not compound with~$N$.
+The AI inference industry keeps models resident in GPU memory around the clock to avoid cold-start latency, treating idle power as a fixed cost of readiness. The structure of this cost has not been decomposed empirically, and not across GPU architectures. We combine 18~days of production telemetry (\num{335267} idle samples, 14~H100 GPUs) with controlled dose-response experiments on four architectures---H100 (HBM3), A100 (HBM2e), L40S (GDDR6), and B200 (Blackwell, HBM3e)---to isolate the CUDA context as the variable that sets idle power. Idle power is \emph{piecewise constant}: creating a CUDA context forces a DVFS transition that adds $26$--$66$\,W over bare idle, while the marginal VRAM effect is statistically indistinguishable from zero ($|\beta| < 0.02$\,W/GB) on every device tested. On the H100, a real Qwen2.5-7B model idles within 0.03\,W of an equal-context empty allocation. NVIDIA's \perfboost driver flag returns idle-with-context power toward the bare-idle floor, recovering roughly 95--100\% of the overhead, with no steady-state latency penalty measured under vLLM on the H100 and A100. On a 4$\times$H100~SXM node the tax multiplies linearly at ${\sim}52$\,W per GPU across tensor, data, and mixed parallelism---so a 4-GPU node wastes ${\sim}215$\,W idle---while the first-request cold-start penalty stays constant at ${\sim}150$\,ms regardless of GPU count. Setting the flag at process start is a near-zero-cost mitigation: the DVFS governor drops clocks to bare idle within 2\,s of the last request and ramps on demand, the only cost being a one-time ${\sim}150$\,ms first-request penalty that does not compound with~$N$. At data-center scale, a mid-range scenario places the recoverable overhead near \num{460}\,GWh per year (${\sim}180$\,kT CO$_2$).
 \end{abstract}
 
 \keywords{GPU energy, idle power, VRAM, DVFS, model serving, sustainability}
@@ -43,15 +43,15 @@ The AI inference industry keeps models loaded in GPU memory around the clock to 
 \section{Introduction}
 % ===========================================================================
 
-The default operating model for AI inference is to deploy models to GPUs and keep them loaded in VRAM indefinitely, accepting continuous idle power consumption to avoid cold-start latency. Both sides of this tradeoff are individually well-studied. The cold-start problem has driven systems like ServerlessLLM~\cite{serverlessllm} (3.6--8.2$\times$ faster loading), NVIDIA Run:ai Model Streamer~\cite{nvidia-streamer} ($\sim$5\,s for Llama~3 8B), and checkpoint-optimized loaders~\cite{hydraserve,lambdascale}. But the \emph{other side}---the ongoing energy cost of readiness---has been treated as an unquantified constant.
+The default operating model for AI inference is to deploy models to GPUs and keep them loaded in VRAM indefinitely, accepting continuous idle power consumption to avoid cold-start latency. Both sides of this tradeoff are individually well-studied. The cold-start problem has driven systems like ServerlessLLM~\cite{serverlessllm} (3.6--8.2$\times$ faster loading), NVIDIA Run:ai Model Streamer~\cite{nvidia-streamer} ($\sim$5\,s for Llama~3 8B), and checkpoint-optimized loaders~\cite{hydraserve,lambdascale}. The other side---the ongoing energy cost of readiness---has been treated as an unquantified constant.
 
 The 2024 US Data Center Energy Usage Report estimates GPU idle power at $\sim$20\% of Thermal Design Power (TDP)~\cite{doe-report}. Patel et al.~\cite{patel-cal23} showed that CUDA contexts on A100 GPUs force higher clock frequencies even when idle. Concurrent work by Lei et al.~\cite{lei-idle} characterizes the prevalence of ``execution-idle'' at cluster scale---19.7\% of in-execution time and 10.7\% of energy across 756~GPUs over 31~days---but does not decompose idle power into its component causes. No prior study has measured the marginal energy cost \emph{per GB of VRAM allocation}---the quantity needed for rational keep-warm decisions---nor tested whether the result generalizes across GPU architectures and memory technologies. Moreover, modern LLM serving routinely distributes models across multiple GPUs via tensor parallelism (TP), data parallelism (DP), or both. If the parking tax multiplies linearly with~$N$, a single 4-GPU node wastes ${\sim}215$\,W idle; an 8-GPU node wastes ${\sim}430$\,W. At cluster scale with thousands of GPUs, even modest idle fractions translate to kilowatts of waste. Yet no study has measured whether the tax compounds, remains constant, or interacts with inter-GPU communication (NCCL).
 
-This paper fills that gap. We ask: \textbf{does storing model weights in GPU VRAM incur a measurable marginal idle energy cost, and is the answer architecture-dependent?} We answer with four complementary studies:
+This paper addresses that gap. We ask whether storing model weights in GPU VRAM incurs a measurable marginal idle energy cost, and whether the answer depends on GPU architecture. We answer with four complementary studies:
 
 \begin{enumerate}
     \item \textbf{Production telemetry} (Phase~1): \num{335267} idle-state samples from 14~H100 GPUs across 2~nodes over 18~days, with VRAM allocations spanning 3\,MB to 79\,GB.
-    \item \textbf{Controlled experiments} (Phase~2): Within-subject dose-response studies on three GPU architectures---H100 (HBM3), A100 (HBM2e), and L40S (GDDR6)---systematically varying VRAM from 0 to 40--72\,GB, validated with real HuggingFace model weights.
+    \item \textbf{Controlled experiments} (Phase~2): Within-subject dose-response studies on four GPU architectures---H100 (HBM3), A100 (HBM2e), L40S (GDDR6), and B200 (Blackwell, HBM3e)---systematically varying VRAM from 0 to 40--72\,GB, validated with real model weights.
     \item \textbf{Vendor mitigation} (Phase~3): Evaluation of NVIDIA's \perfboost driver flag on H100 (Hopper) and A100 (Ampere), measuring idle power elimination, steady-state latency, and first-request DVFS ramp under both synthetic and vLLM workloads.
     \item \textbf{Multi-GPU scaling} (Phase~4): 9~conditions on a 4$\times$H100~SXM node testing TP=2, TP=4, DP=2, and TP=2$\times$DP=2 with and without \perfboost, measuring idle power, warm latency, DVFS decay, and cold-start ramp per parallelism strategy.
 \end{enumerate}
@@ -93,7 +93,7 @@ $P_{\text{background}}$ is constant whenever the memory clock runs. $P_{\text{re
     \frac{\partial P_{\text{mem}}}{\partial \text{occupancy}} \approx 0
     \label{eq:mem-prediction}
 \end{equation}
-Memory controller and background power dominate at idle, remaining constant regardless of occupancy. DRAM refresh sweeps all rows per JEDEC specification, independent of which rows contain valid data---making $\beta \approx 0$ a hardware-physics prediction, not merely an empirical observation. A flat VRAM dose-response is a prediction of memory physics, not an accidental finding. Our experiments test this prediction across three memory technologies.
+Memory controller and background power dominate at idle, remaining constant regardless of occupancy. DRAM refresh sweeps all rows per JEDEC specification, independent of which rows contain valid data---making $\beta \approx 0$ a hardware-physics prediction, not merely an empirical observation. A flat VRAM dose-response is therefore predicted by memory physics, and the invariance should be expected to generalize across DRAM technologies rather than being specific to one device. Our experiments test this prediction across three memory technologies.
 
 \subsection{Related Work}
 
@@ -139,6 +139,7 @@ We conducted within-subject dose-response experiments on three GPUs (Table~\ref{
 H100 80GB SXM & HBM3 & 700\,W & 0--64\,GB & 40 \\
 A100 80GB PCIe & HBM2e & 300\,W & 0--72\,GB & 40 \\
 L40S 48GB & GDDR6 & 350\,W & 0--40\,GB & 40 \\
+B200 180GB SXM & HBM3e & 1000\,W & 0--32\,GB & 18 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -156,7 +157,7 @@ The noisiest GPU (L40S, GDDR6) has $\sigma < 1.5$\,W; the cleanest (A100, HBM2e)
     \Delta P_{\text{VRAM}} < 1\,\text{W across full VRAM range on all GPUs}
     \label{eq:bound}
 \end{equation}
-This converts our measurement limitation into a \emph{result constraint}. Regarding Burtscher et al.'s~\cite{burtscher-power} finding that \texttt{nvidia-smi} undersamples: our within-phase standard deviations confirm idle power is stable enough that subsampling does not bias means. Complementary per-instruction energy models such as Wattchmen~\cite{wattchmen} achieve finer-grained decomposition; extending our idle-state analysis with such methods is a promising direction.
+This converts our measurement limitation into a \emph{result constraint}. Regarding Burtscher et al.'s~\cite{burtscher-power} finding that \texttt{nvidia-smi} undersamples: our within-phase standard deviations confirm idle power is stable enough that subsampling does not bias means. Complementary per-instruction energy models such as Wattchmen~\cite{wattchmen} achieve finer-grained decomposition; extending our idle-state analysis with such methods is a promising direction. For the shorter Blackwell and idle-recovery runs, and in the dose-response figures, we report the per-phase \emph{median} rather than the mean of Equation~\ref{eq:sampling}: the median is insensitive to the occasional transient DVFS boost a single sample can capture (one such sample appears in the Blackwell flag run), and on the 20-minute primary phases ($n=40$) the mean and median agree to within 1\,W.
 
 \subsection{Phase~3: Vendor Mitigation Setup}
 \label{sec:perf-boost-setup}
@@ -219,32 +220,34 @@ The CUDA context effect is $+70.9$\,W (Cohen's $d = 7.3$, $p < 10^{-300}$). With
 Table~\ref{tab:cross} and Figure~\ref{fig:hero} present the controlled experiments across all three GPUs.
 
 \begin{table}[t]
-\caption{Cross-architecture parking tax. Power values are mean $\pm$ std. $\beta$ is the linear regression slope across CUDA-active phases. All GPUs at 0\% utilization.}
+\caption{Cross-architecture parking tax. Power values are per-phase means (medians for B200; \S\ref{sec:measurement}). $\beta$ is the linear regression slope across CUDA-active phases. All GPUs at 0\% utilization.}
 \label{tab:cross}
-\small
-\begin{tabular}{lrrr}
+\scriptsize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrr}
 \toprule
- & \textbf{H100} & \textbf{A100} & \textbf{L40S} \\
- & \textbf{(HBM3)} & \textbf{(HBM2e)} & \textbf{(GDDR6)} \\
+ & \textbf{H100} & \textbf{A100} & \textbf{L40S} & \textbf{B200} \\
+ & \textbf{(HBM3)} & \textbf{(HBM2e)} & \textbf{(GDDR6)} & \textbf{(HBM3e)} \\
 \midrule
-Bare idle (W) & 71.8 & 53.7 & 35.6 \\
-SM clock, bare (MHz) & 345 & 210 & 210 \\
-CUDA ctx power (W) & 121.7 & 80.0 & 102.1 \\
-SM clock, ctx (MHz) & 1980 & 1410 & 2520 \\
+Bare idle (W) & 71.8 & 53.7 & 35.6 & 181.7 \\
+SM clk, bare (MHz) & 345 & 210 & 210 & 120 \\
+CUDA ctx power (W) & 121.7 & 80.0 & 102.1 & 233.6 \\
+SM clk, ctx (MHz) & 1980 & 1410 & 2520 & 1965 \\
 \midrule
-\textbf{Context overhead (W)} & \textbf{+49.9} & \textbf{+26.3} & \textbf{+66.4} \\
-Context (\% of TDP) & 7.1\% & 8.8\% & 19.0\% \\
+\textbf{Context overhead (W)} & \textbf{+49.9} & \textbf{+26.3} & \textbf{+66.4} & \textbf{+51.9} \\
+Context (\% of TDP) & 7.1\% & 8.8\% & 19.0\% & 5.2\% \\
 \midrule
-Max VRAM tested (GB) & 64 & 72 & 40 \\
-Power range, VRAM (W) & +0.34 & $-$0.09 & +0.08 \\
-$\beta$ (W/GB) & $-$0.002 & $-$0.001 & $-$0.002 \\
-$p$-value ($\beta = 0$) & 0.404 & 0.002$^\dagger$ & 0.794 \\
-$p_{\text{TOST}}$ ($|\beta| < 0.1$) & $10^{-9}$ & $<0.001$ & $<0.05$ \\
+Max VRAM tested (GB) & 64 & 72 & 40 & 32 \\
+Power range, VRAM (W) & +0.34 & $-$0.09 & +0.08 & +0.60 \\
+$\beta$ (W/GB) & $-$0.002 & $-$0.001 & $-$0.002 & $+$0.019 \\
+$p$-value ($\beta = 0$) & 0.404 & 0.002$^\dagger$ & 0.794 & $<$0.001$^\dagger$ \\
+$p_{\text{TOST}}$ ($|\beta| < 0.1$) & $10^{-9}$ & $<0.001$ & $<0.05$ & $<0.001$ \\
 \midrule
-\textbf{Context \% of tax} & \textbf{$>$99\%} & \textbf{$>$99\%} & \textbf{$>$99\%} \\
+\textbf{Context \% of tax} & \textbf{$>$99\%} & \textbf{$>$99\%} & \textbf{$>$99\%} & \textbf{$>$99\%} \\
 \bottomrule
-\multicolumn{4}{l}{\footnotesize $^\dagger$Slope is \emph{negative}; see \S\ref{sec:a100-note}.}
 \end{tabular}
+\par\vspace{2pt}
+\parbox{\columnwidth}{\footnotesize $^\dagger$Slope significant but a temporal/thermal artifact of the sequential sweep (A100 negative, B200 positive), $<$1\,W total and far below the 0.1\,W/GB bound; see \S\ref{sec:a100-note}. B200 values are per-phase medians (transient-robust); others are means, agreeing within 1\,W.}
 \end{table}
 
 \paragraph{CUDA context overhead.} On all three GPUs, creating a CUDA context triggers a discrete DVFS transition: SM clocks jump from 210--345\,MHz to 1410--2520\,MHz (architecture-dependent). The associated power step ranges from $+26.3$\,W (A100) to $+66.4$\,W (L40S). This is the dominant component of the parking tax on every architecture.
@@ -255,7 +258,7 @@ $p_{\text{TOST}}$ ($|\beta| < 0.1$) & $10^{-9}$ & $<0.001$ & $<0.05$ \\
     \item A100: $\beta = -0.001$\,W/GB, 95\% CI $[-0.002, -0.0005]$, $p = 0.002^\dagger$
     \item L40S: $\beta = -0.002$\,W/GB, 95\% CI $[-0.019, +0.015]$, $p = 0.79$
 \end{itemize}
-We fail to reject $\beta = 0$ on the H100 and L40S. On the A100, $\beta$ is statistically significant but negative (see below). To move beyond the absence of evidence, we apply the Two One-Sided Tests (TOST) equivalence procedure~\cite{schuirmann-tost} with an equivalence bound of $\Delta = \pm 0.1$\,W/GB---chosen so that even a 64\,GB model would contribute $<$6.4\,W---an order of magnitude smaller than the DVFS overhead (26--66\,W) on every architecture tested. This ensures the equivalence bound is conservative: any effect below $\Delta$ is operationally irrelevant for keep-warm decisions. On all three GPUs, the TOST procedure rejects the hypothesis that $|\beta| \geq 0.1$\,W/GB ($p_{\text{TOST}} < 0.05$), formally establishing that the marginal VRAM effect is bounded below practical relevance. Figure~\ref{fig:regression} shows the zoomed regression detail for all three GPUs.
+We fail to reject $\beta = 0$ on the H100 and L40S. On the A100, $\beta$ is statistically significant but negative (see below). To move beyond the absence of evidence, we apply the Two One-Sided Tests (TOST) equivalence procedure~\cite{schuirmann-tost} with an equivalence bound of $\Delta = \pm 0.1$\,W/GB---chosen so that even a 64\,GB model would contribute $<$6.4\,W---an order of magnitude smaller than the DVFS overhead (26--66\,W) on every architecture tested. This ensures the equivalence bound is conservative: any effect below $\Delta$ is operationally irrelevant for keep-warm decisions. On all three GPUs, the TOST procedure rejects the hypothesis that $|\beta| \geq 0.1$\,W/GB ($p_{\text{TOST}} < 0.05$): under the tested protocol we do not merely fail to find a memory effect, but bound it several-fold below the DVFS step. Two caveats attend this bound. The sweep is sequential on one device per architecture, so the within-phase samples are correlated and the effective observations are the per-phase means rather than the 40 raw samples. And the sequential design cannot fully separate a small VRAM term from slow time or thermal drift---the negative A100 slope below is one such confound. Figure~\ref{fig:regression} shows the zoomed regression detail for all three GPUs.
 
 \paragraph{The A100 negative slope.}
 \label{sec:a100-note}
@@ -274,14 +277,14 @@ with $\beta \approx 0$ on all three. The parking tax is a step function determin
 \begin{figure}[t]
     \centering
     \includegraphics[width=\columnwidth]{cross_architecture_dose_response.png}
-    \caption{The Model Parking Tax across three GPU architectures. Large markers at ``bare'': bare-idle power (no CUDA context). Connected lines: CUDA-active phases with increasing VRAM. The discrete DVFS step dominates; all three dose-response curves are flat. The result holds across HBM3, HBM2e, and GDDR6 memory technologies.}
+    \caption{The model parking tax across four GPU architectures. Large markers (``bare''): bare-idle power with no CUDA context. Connected lines: CUDA-active phases with increasing VRAM. The discrete DVFS step dominates on every device, and all dose-response curves are flat across HBM3, HBM2e, GDDR6, and HBM3e (Blackwell). More model does not raise idle power.}
     \label{fig:hero}
 \end{figure}
 
 \begin{figure}[t]
     \centering
     \includegraphics[width=\columnwidth]{parking_tax_decomposition.png}
-    \caption{Parking tax decomposition. Gray: base idle power. Color: CUDA context overhead (98--$>$99\% of the tax).}
+    \caption{Parking tax decomposition. Gray: base idle power. Color: CUDA context overhead (98--$>$99\% of the tax on every architecture). The VRAM term is too small to render.}
     \label{fig:decomp}
 \end{figure}
 
@@ -292,12 +295,21 @@ with $\beta \approx 0$ on all three. The parking tax is a step function determin
     \label{fig:regression}
 \end{figure}
 
+\paragraph{Blackwell (HBM3e).} On the B200 (Blackwell, HBM3e) we ran the same dose-response over four VRAM levels (3-minute phases, $n=18$; Figure~\ref{fig:b200}). Creating a context raises idle power from 182\,W (120\,MHz) to 234\,W (1965\,MHz)---a 52\,W tax at 0\% utilization---and power stays flat within 1\,W across 0--32\,GB, matching the other three architectures. The boosting default is present on this current-generation part.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{b200_dose_response.png}
+    \caption{Dose-response on an NVIDIA B200 (Blackwell, HBM3e); four VRAM levels, $n=18$ per phase. Creating a CUDA context adds a 52\,W tax (182$\to$234\,W) at 0\% utilization; power then stays flat within 1\,W across 0--32\,GB, matching the other three architectures.}
+    \label{fig:b200}
+\end{figure}
+
 \subsection{Real Model Validation}
 
-The Phase~2 experiments use \texttt{torch.empty} tensors to isolate the VRAM effect from model-specific CUDA state. To validate that real model weights---with their associated CUDA kernels, cuDNN handles, and weight tensors---do not alter the result, we loaded a production HuggingFace model (Qwen2.5-7B in fp16~\cite{qwen2}) on all three GPU architectures and measured idle power. On the A100 and L40S, we additionally compared loaded-model idle power against post-unload power (same CUDA context, model weights freed).
+The Phase~2 experiments use \texttt{torch.empty} tensors to isolate the VRAM effect from model-specific CUDA state. To confirm that real model weights---with their CUDA kernels, cuDNN handles, and weight tensors---do not change the result, we loaded a production Qwen2.5-7B model (fp16~\cite{qwen2}) and measured idle power (Table~\ref{tab:validation}).
 
 \begin{table}[t]
-\caption{Real model validation across three architectures. Qwen2.5-7B (fp16, $\sim$14.9\,GB) idle power compared against a reference with different VRAM but the same CUDA context. H100: \texttt{torch.empty} 16\,GB; A100 and L40S: post-unload residual context ($\sim$0.5\,GB). All deltas are within measurement noise.}
+\caption{Real-model validation on the H100. A real Qwen2.5-7B (fp16) idles within 0.03\,W of a 16\,GB \texttt{torch.empty} allocation holding the same CUDA context; the delta is within measurement noise.}
 \label{tab:validation}
 \small
 \begin{tabular}{@{}llrrr@{}}
@@ -306,23 +318,17 @@ The Phase~2 experiments use \texttt{torch.empty} tensors to isolate the VRAM eff
 \midrule
 \multirow{2}{*}{H100} & \texttt{torch.empty} 16\,GB & 16.0 & 121.51 & --- \\
  & Qwen2.5-7B (fp16) & 14.9 & 121.48 & $-$0.03\,W \\
-\midrule
-\multirow{2}{*}{A100} & Qwen2.5-7B (fp16) & 14.8 & 105.32 & --- \\
- & Post-unload (ctx only) & 0.5 & 105.53 & +0.21\,W \\
-\midrule
-\multirow{2}{*}{L40S} & Qwen2.5-7B (fp16) & 14.8 & 97.07 & --- \\
- & Post-unload (ctx only) & 0.5 & 97.54 & +0.47\,W \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:validation} shows the results. On the H100, Qwen2.5-7B idles at 121.48\,W---within 0.03\,W of the \texttt{torch.empty} baseline ($n=30$, $\sigma = 0.11$\,W). On the A100 and L40S, unloading the model (freeing 14.3\,GB of weights while retaining the CUDA context at $\sim$0.5\,GB) changes idle power by only +0.21\,W and +0.47\,W respectively---both within measurement noise and far below the 26--66\,W CUDA context overhead. The absolute idle power varies across GPU instances (e.g., 105\,W on this A100 vs.\ 80\,W in Phase~2), consistent with the 23\,W inter-node variation observed in Phase~1; the within-instance VRAM invariance holds regardless. Real model CUDA state does not measurably alter idle power on any architecture tested.
+On the H100, Qwen2.5-7B idles at 121.48\,W---within 0.03\,W of the \texttt{torch.empty} baseline ($n=30$, $\sigma = 0.11$\,W), and far below the 26--66\,W CUDA context overhead. A real 7B model loaded on the L40S idles at 105.85\,W, in line with the context-active idle level measured for that architecture in Phase~2; absolute idle power varies across GPU instances, tracking the $\sim$23\,W inter-node spread observed in Phase~1, while the within-instance VRAM invariance holds regardless. Whether a GPU holds a real 7B model or an equivalent block of empty memory, the idle cost is set by whether a context is resident, not by the model.
 
 \paragraph{Cold-start power profile.} On the H100, we captured 1\,Hz power traces during Qwen2.5-7B loading (29.7\,s). The profile is bursty: 22\,s at bare idle ($\sim$70.8\,W, CPU-side deserialization), a 3\,s GPU burst peaking at 124.1\,W during weight transfer to VRAM, then settling to the CUDA-active idle ($\sim$121\,W). The peak loading power (124\,W) is far below TDP (700\,W), consistent with the I/O-bound nature of model loading. On the A100 and L40S, Qwen2.5-7B loaded in 11.5\,s and 10.8\,s respectively (both fp16, $\sim$14.8\,GB VRAM), corroborating that cold starts for small models complete in seconds across architectures. These measured profiles validate using $P_{\text{load}} \approx 100$--$300$\,W in our breakeven model (Equation~\ref{eq:breakeven}).
 
 \subsection{Cold-Start Breakeven Model}
 
-Given a parking tax of $P_{\text{park}}$ watts, a natural question is whether it is cheaper to evict the model and cold-start it on the next request. The energy breakeven between keeping warm and cold-starting is:
+Given a parking tax of $P_{\text{park}}$ watts, an operator may instead evict the model and cold-start it on the next request. The energy breakeven between keeping warm and cold-starting is:
 \begin{equation}
     T^* = \frac{P_{\text{load}} \cdot t_{\text{load}}}{P_{\text{park}}}
     \label{eq:breakeven}
@@ -349,7 +355,7 @@ Run:ai Streamer (8B) & 200 & 5 & 20\,s \\
 
 \paragraph{Queueing extension.} If requests arrive as a Poisson process with rate $\lambda$, the optimal eviction threshold is $\lambda^* = P_{\text{park}} / (P_{\text{load}} \cdot t_{\text{load}})$. For H100 with PyTorch loading: $\lambda^* \approx 13$\,req/hr; below this rate, cold-starting saves energy.
 
-\paragraph{A third option.} The breakeven analysis assumes a binary keep-warm-or-evict decision. But a third option exists: keep the model loaded while eliminating the parking tax at the driver level, paying only a transient ramp cost per idle-to-active transition instead of a full cold start. We evaluate this next.
+\paragraph{A third option.} The breakeven analysis assumes a binary keep-warm-or-evict decision. A third option keeps the model loaded while removing the parking tax at the driver level, paying only a transient ramp cost per idle-to-active transition instead of a full cold start. We evaluate it next.
 
 \subsection{Phase~3: Vendor Mitigation}
 \label{sec:perf-boost}
@@ -357,7 +363,7 @@ Run:ai Streamer (8B) & 200 & 5 & 20\,s \\
 NVIDIA's \perfboost environment variable (added in the 580 driver series; tested at $\geq$580.105.08, November 2025) is the most direct vendor-provided mechanism targeting the DVFS anomaly. Using the experimental protocol described in \S\ref{sec:perf-boost-setup}, we evaluate its effectiveness on H100 (Hopper) and A100 (Ampere).
 
 \begin{table}[t]
-\caption{Effect of \perfboost on idle-with-context power. Each cell: mean $\pm$ std ($n=40$, 20-min phases). H100 SXM: driver 580.126.09; A100 SXM4: driver 580.126.16.}
+\caption{Effect of \perfboost on idle-with-context power. H100/A100: mean $\pm$ std ($n=40$, 20-min phases; drivers 580.126.09 and 580.126.16). L40S and B200: shorter idle-only protocol (per-phase medians).}
 \label{tab:perf-boost}
 \small
 \begin{tabular}{@{}llrrrr@{}}
@@ -371,6 +377,14 @@ NVIDIA's \perfboost environment variable (added in the 580 driver series; tested
 \multirow{3}{*}{\shortstack[l]{A100 SXM4\\(Ampere)}} & Bare idle & 64.0 $\pm$ 0.3 & 210 & --- & --- \\
  & Baseline & 75.1 $\pm$ 0.5 & 1155 & --- & +11.1 \\
  & Flag on & 64.5 $\pm$ 0.4 & 210 & --- & $-$10.6 \\
+\midrule
+\multirow{3}{*}{\shortstack[l]{L40S\\(Ada Lovelace)}} & Bare idle & 35.6 $\pm$ 0.1 & 210 & --- & --- \\
+ & Baseline & 102.7 $\pm$ 0.7 & 2520 & --- & +67.1 \\
+ & Flag on & 36.7 $\pm$ 0.1 & 210 & --- & $-$66.0 \\
+\midrule
+\multirow{3}{*}{\shortstack[l]{B200\\(Blackwell)}} & Bare idle & 181.7 $\pm$ 0.2 & 120 & --- & --- \\
+ & Baseline & 233.5 $\pm$ 0.2 & 1965 & --- & +51.8 \\
+ & Flag on & 181.8 $\pm$ 0.3 & 120 & --- & $-$51.7 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -426,19 +440,37 @@ NVIDIA's \perfboost environment variable (added in the 580 driver series; tested
 \end{tabular}
 \end{table}
 
-\paragraph{H100 results.} Table~\ref{tab:perf-boost} summarizes the flag's effect on idle power. On the H100 (driver 580.126.09, $n=40$, 20-min phases), \perfboost\texttt{=1} \textbf{eliminates the parking tax within measurement noise}. With the flag set, the SM clock remains at the bare-idle frequency of 345\,MHz---identical to the no-CUDA-context state---even though a CUDA context is active and 16\,GB of VRAM is allocated. Idle power drops from 128.1\,W (baseline) to 73.1\,W (flag on), a reduction of 55.0\,W that accounts for $>$100\% of the DVFS overhead measured in Phase~2 ($\Delta P_{\text{DVFS}} = 49.9$\,W in Table~\ref{tab:cross}; the overshoot is within inter-session variance). The flag-on power (73.1 $\pm$ 0.1\,W) is indistinguishable from bare idle (73.3 $\pm$ 0.1\,W), confirming that the entire parking tax is attributable to the DVFS boost and that the flag successfully suppresses it. The effect persists through the full 20-minute recording period with no sign of driver heuristics overriding the setting (38/40 samples clean; 2 exhibited transient spikes consistent with driver telemetry events).
+\paragraph{H100 results.} Table~\ref{tab:perf-boost} summarizes the flag's effect on idle power. On the H100 (driver 580.126.09, $n=40$, 20-min phases), \perfboost\texttt{=1} eliminates the parking tax within measurement noise. With the flag set, the SM clock remains at the bare-idle frequency of 345\,MHz---identical to the no-CUDA-context state---even though a CUDA context is active and 16\,GB of VRAM is allocated. Idle power drops from 128.1\,W (baseline) to 73.1\,W (flag on), a reduction of 55.0\,W that accounts for $>$100\% of the DVFS overhead measured in Phase~2 ($\Delta P_{\text{DVFS}} = 49.9$\,W in Table~\ref{tab:cross}; the overshoot is within inter-session variance). The flag-on power (73.1 $\pm$ 0.1\,W) is indistinguishable from bare idle (73.3 $\pm$ 0.1\,W), confirming that the entire parking tax is attributable to the DVFS boost and that the flag successfully suppresses it. The effect persists through the full 20-minute recording period with no sign of driver heuristics overriding the setting (38/40 samples clean; 2 exhibited transient spikes consistent with driver telemetry events).
 
 \paragraph{A100 results.} On the A100 SXM4 (driver 580.126.16, $n=40$, 20-min phases), the flag produces the same structural result. Without the flag, a CUDA context boosts the SM clock from 210\,MHz to 1155\,MHz, adding 11.1\,W over bare idle. With the flag set, the SM clock remains at 210\,MHz and idle power drops from 75.1\,W (baseline) to 64.5\,W---within 0.5\,W of bare idle (64.0\,W). The 10.6\,W reduction recovers 96\% of the DVFS overhead (10.6 of 11.1\,W; the 0.5\,W residual is within measurement noise). This A100 SXM4 variant boosts to a lower idle clock (1155\,MHz) than the PCIe variant tested in Phase~2 (1410\,MHz, 26.3\,W overhead), but the flag eliminates the overhead on both form factors, confirming the mitigation is not variant-specific.
 
+\paragraph{The mitigation holds across four architectures.} Beyond the H100 and A100 (Table~\ref{tab:perf-boost}), we measured the flag's idle-power effect on the L40S and B200 with an idle-only protocol (Figure~\ref{fig:flag-recovery}). On the L40S---the highest-tax device---context-active idle falls from 102\,W (2520\,MHz) to 36.8\,W (210\,MHz), the bare-idle floor: essentially the full tax recovered. On the Blackwell B200 the flag returns idle power to the same floor: with the flag set, median context-active idle falls from 234\,W to 182\,W (the bare-idle floor), and the SM clock dropped to 120\,MHz in 71 of 72 context-active samples, with one transient boost during the 4\,GB phase. Across all four architectures the flag recovers roughly 95--100\% of the context overhead.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{flag_recovery_across_architectures.png}
+    \caption{The \perfboost flag returns context-active idle power toward the bare-idle floor on all four architectures (H100, A100, L40S, B200). Recovery is roughly 95--100\% on all four; on the B200 the flag returns context-active idle to the 120\,MHz bare floor (234$\to$182\,W).}
+    \label{fig:flag-recovery}
+\end{figure}
+
 \paragraph{vLLM idle power.} To validate through a real serving stack, we measured vLLM~\cite{vllm} idle power serving Qwen2.5-7B (fp16) on both architectures (Table~\ref{tab:vllm-idle}, Figure~\ref{fig:perf-boost-power}). On H100, vLLM baseline idles at 128.6\,W; with the flag, it drops to 73.1\,W ($-$55.5\,W). On A100, vLLM baseline idles at 73.9\,W; with the flag, 64.3\,W ($-$9.6\,W). VRAM usage is unchanged ($\sim$72\,GB on both). The flag's effect is identical whether the CUDA context comes from \texttt{torch.empty} or a full serving framework.
 
-\paragraph{Inference latency.} Does the flag introduce a latency penalty when requests arrive and the GPU must ramp clocks from idle? We measure this with a focused retest protocol: start vLLM, send 3 warmup requests, idle for 60\,s (allowing clocks to drop under the flag), then send 5 ``cold'' requests followed by 50 ``warm'' requests back-to-back.
+\paragraph{Inference latency.} We test whether the flag adds latency when requests arrive and the GPU must ramp clocks from idle, using a focused retest protocol: start vLLM, send 3 warmup requests, idle for 60\,s (allowing clocks to drop under the flag), then send 5 ``cold'' requests followed by 50 ``warm'' requests back-to-back.
 
 \emph{Steady state} (Table~\ref{tab:latency}, Figure~\ref{fig:perf-boost-latency}): Across 50 warm requests on both GPUs, latency is identical with and without the flag. On the H100, mean latency is 533.3\,ms (flag on) vs.\ 533.4\,ms (baseline); on the A100, 910.0\,ms vs.\ 910.0\,ms. All percentiles through p99 are within 1.2\,ms on both architectures. vLLM uses CUDA graphs for decode-phase execution; the identical latency distributions confirm that CUDA graphs function correctly under the flag.
 
 \emph{First-request ramp} (Table~\ref{tab:cold-ramp}): The flag does introduce a one-time DVFS ramp penalty on the first request after an idle period. On the H100, the first request after 60\,s idle takes 683\,ms with the flag ($+$147\,ms over steady state) vs.\ 546\,ms without ($+$10\,ms). On the A100, the penalty is 1{,}130\,ms ($+$220\,ms) vs.\ 921\,ms ($+$11\,ms). By request~2, latency returns to steady state on both architectures. The ramp is a one-time cost per idle-to-active transition, mitigable with a single warmup request or keep-alive probe. This contrasts with Lei et al.'s~\cite{lei-idle} frequency downscaling, which achieves 22--34\% idle power savings on L40S but with \emph{persistent} latency tradeoffs throughout active inference. The flag eliminates the parking tax during idle while preserving full clock speeds during sustained inference---comparable savings with only a transient cost at the idle-to-active boundary.
 
 This reframes the breakeven model (\S4.4): instead of choosing between keep-warm (pay the tax) and evict (pay the cold start), the flag offers a third option---keep-warm with no tax and only a ${\sim}150$\,ms ramp. For workloads that must remain responsive, this appears to dominate both alternatives.
+
+\paragraph{Throughput under load.} To check that the flag does not cap active clocks, we ran a high-concurrency decode benchmark on the H100 (Qwen2.5-7B, 512 requests at concurrency~64; Figure~\ref{fig:throughput}). In a single run, aggregate decode throughput was 9287\,tok/s at baseline and 9355\,tok/s with the flag (a 0.7\% difference); repeated trials would be needed to characterize run-to-run variance. In both conditions the GPU held the same 1980\,MHz load SM clock---its full boost frequency---so the flag does not cap active clocks. It suppresses only the idle boost.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{throughput_flag_comparison.png}
+    \caption{H100 decode throughput and load SM clock, flag off vs.\ on (Qwen2.5-7B, 512 requests at concurrency~64, single run). Throughput is 9287\,tok/s (baseline) and 9355\,tok/s (flag); both hold the 1980\,MHz load clock. The flag does not cap active clocks.}
+    \label{fig:throughput}
+\end{figure}
 
 \begin{figure}[t]
     \centering
@@ -624,7 +656,7 @@ Breakeven ($T^*$=4.5\,min) & 2{,}682 & 8.2\% & 100 \\
 \section{Discussion}
 % ===========================================================================
 
-\paragraph{Cross-architecture consistency.} The parking tax is a step function of CUDA context on H100 (Hopper), A100 (Ampere), and L40S (Ada Lovelace)---three microarchitectures with different memory technologies, process nodes, and TDP budgets. The magnitude varies (26--66\,W), but the structure is identical: $\partial P / \partial C \gg \partial P / \partial V$. With $n = 1$ device per architecture in Phase~2, we cannot claim universal invariance, but the consistency---combined with the physics argument of Equation~\ref{eq:mem-prediction}---points to a design-space constraint rather than a device-specific artifact. Phase~1 bounds inter-device variation directly: regression across all 14~H100 GPUs yields slopes indistinguishable from zero on every device, even as intercepts vary by $\sim$23\,W from silicon binning and cooling. This pattern is consistent with $\beta \approx 0$ being device-invariant rather than an artifact of any particular GPU.
+\paragraph{Cross-architecture consistency.} The parking tax is a step function of CUDA context on H100 (Hopper), A100 (Ampere), and L40S (Ada Lovelace), and on Blackwell (B200)---four microarchitectures with different memory technologies, process nodes, and TDP budgets. The magnitude varies (26--66\,W), but the structure is identical: $\partial P / \partial C \gg \partial P / \partial V$. With $n = 1$ device per architecture in Phase~2 (with an $n=18$ protocol on the B200), we cannot claim universal invariance, but the consistency---combined with the physics argument of Equation~\ref{eq:mem-prediction}---points to a design-space constraint rather than a device-specific artifact. Phase~1 bounds inter-device variation directly: regression across all 14~H100 GPUs yields slopes indistinguishable from zero on every device, even as intercepts vary by $\sim$23\,W from silicon binning and cooling. This pattern is consistent with $\beta \approx 0$ being device-invariant rather than an artifact of any particular GPU.
 
 \paragraph{Relationship to execution-idle.} Lei et al.~\cite{lei-idle} find that execution-idle accounts for 19.7\% of in-execution time and 10.7\% of energy across 756~GPUs. Execution-idle is a superset of the zero-activity state we measure---it includes I/O stalls, synchronization barriers, and data loading pauses. Our parking tax is the dominant sub-component when GPU activity is strictly zero. On the L40S, our CUDA context overhead (66.4\,W) accounts for the bulk of the gap between their deep-idle ($\sim$35\,W) and execution-idle ($\sim$110\,W) power levels. Their finding that serving workloads spend 61\% of in-execution time idle, combined with our result that idle power is model-size-independent, points to small always-on deployments as the largest per-GPU energy waste.
 
@@ -641,20 +673,20 @@ Based on our measurements, setting \perfboost\texttt{=1} in the process environm
 Savings scale linearly with $N$ (Equation~\ref{eq:linear-scaling}): 4-GPU node saves ${\sim}215$\,W, 8-GPU node saves ${\sim}430$\,W. At 30\% idle fraction~\cite{flexera,lei-idle}, a 1{,}000-GPU cluster saves ${\sim}16$\,kW (${\sim}140$\,MWh/year). Implementation: one environment variable in the container spec or launcher script, with an optional keep-alive probe for latency-sensitive deployments.
 
 \paragraph{Pipeline parallelism and multi-node deployments.}
-Our experiments cover TP and DP on a single NVLink node. Two natural extrapolations follow. Pipeline parallelism (PP)---does the parking tax behave the same when stages communicate via point-to-point send/recv rather than all-reduce? The mechanism we identify is per-CUDA-context and independent of communication pattern (\S\ref{sec:multi-gpu}), which suggests yes, but we have not measured it directly. Multi-node deployments---the DVFS governor on each GPU responds to local SM activity, not the interconnect fabric, so InfiniBand or RoCE should not change the per-GPU result. Under this hypothesis, a 64-GPU deployment across 8 nodes would waste $64 \times 52 \approx 3{,}328$\,W idle and recover the same via the flag. Both extrapolations are testable; we leave direct validation as future work.
+Our experiments cover TP and DP on a single NVLink node. Two extrapolations follow. Under pipeline parallelism (PP), stages communicate via point-to-point send/recv rather than all-reduce; the mechanism we identify is per-CUDA-context and independent of communication pattern (\S\ref{sec:multi-gpu}), so the per-GPU tax should be unchanged, though we have not measured it directly. For multi-node deployments, the DVFS governor on each GPU responds to local SM activity, not the interconnect fabric, so InfiniBand or RoCE should not change the per-GPU result. Under this hypothesis, a 64-GPU deployment across 8 nodes would waste $64 \times 52 \approx 3{,}328$\,W idle and recover the same via the flag. Both extrapolations are testable; we leave direct validation as future work.
 
 \paragraph{Adoption barriers.}
 The flag has been available since November 2025 but has not seen adoption. We cannot answer why empirically, but the structure of the inference-serving market suggests an explanation: the engineers configuring inference engines are typically not the engineers paying the power bill. Cloud GPU tenants pay flat hourly rates with no direct visibility into idle power; the cost falls on infrastructure operators---cloud providers running managed endpoints, inference companies operating GPU fleets, enterprises with on-premise clusters. If this principal-agent gap is real, native support for the flag in inference-serving frameworks (vLLM~\cite{vllm}, SGLang, TensorRT-LLM) could reduce this friction and let the operators with the incentive to act do so at fleet scale.
 
-\paragraph{Design directions.} (1)~\textbf{CUDA context power management}: The \perfboost flag eliminates the DVFS overhead on H100 (100\% recovery) and A100 (96\%) with no steady-state penalty (\S\ref{sec:perf-boost}, \S\ref{sec:multi-gpu}). We did not test L40S due to inventory constraints with recent drivers. The parking tax is a software policy artifact, not a hardware constraint. Orchestrators (Kubernetes device plugins, vLLM launcher scripts) could set the flag by default. (2)~\textbf{Context pooling}: MPS~\cite{nvidia-mps} to share CUDA contexts and amortize overhead; MIG~\cite{nvidia-mig} to isolate tenants while sharing the DVFS cost. (3)~\textbf{Size-aware scheduling}: Preferentially cold-start small models (fast reload, same parking cost). (4)~\textbf{Breakeven-aware eviction}: A $T^*$-based policy saves 8--23\% energy (\S\ref{sec:scheduler}) using only hardware parameters we measure. The breakeven policy slightly underperforms fixed TTLs on gradual traffic ramps (diurnal pattern, Table~\ref{tab:scheduler}) because threshold-based eviction oscillates near the crossover rate; adaptive smoothing or hysteresis could address this.
+\paragraph{Design directions.} (1)~\textbf{CUDA context power management}: The \perfboost flag returns idle-with-context power to the bare-idle floor, recovering roughly 95--100\% of the overhead across all four architectures (H100, A100, L40S, and B200) (\S\ref{sec:perf-boost}, \S\ref{sec:multi-gpu}). No steady-state latency penalty is measured on the H100 and A100, and no throughput penalty in an H100 load test. The parking tax is a software policy artifact, not a hardware constraint. Orchestrators (Kubernetes device plugins, vLLM launcher scripts) could set the flag by default. (2)~\textbf{Context pooling}: MPS~\cite{nvidia-mps} to share CUDA contexts and amortize overhead; MIG~\cite{nvidia-mig} to isolate tenants while sharing the DVFS cost. (3)~\textbf{Size-aware scheduling}: Preferentially cold-start small models (fast reload, same parking cost). (4)~\textbf{Breakeven-aware eviction}: A $T^*$-based policy saves 8--23\% energy (\S\ref{sec:scheduler}) using only hardware parameters we measure. The breakeven policy slightly underperforms fixed TTLs on gradual traffic ramps (diurnal pattern, Table~\ref{tab:scheduler}) because threshold-based eviction oscillates near the crossover rate; adaptive smoothing or hysteresis could address this.
 
-\paragraph{Limitations.} We test one device per architecture in Phase~2 under a controlled within-subject design that isolates VRAM allocation as the sole manipulated variable, eliminating between-device confounders (silicon binning, cooling, power supply). Phase~1 complements this with \num{335267} samples across 14~H100 devices, bounding inter-device slope variation to below measurement sensitivity. All three architectures use $n=40$ per phase (20-minute recording windows). The primary Phase~2 experiments use \texttt{torch.empty} tensors; we validate with a real HuggingFace model (Qwen2.5-7B) on all three architectures, with results consistent with $<$0.5\,W difference on every device (\S4.3, Table~\ref{tab:validation}). Cold-start power traces are captured on the H100; load times are measured on all three. Larger models may exhibit different loading profiles, though the VRAM-independence result is tested up to 72\,GB with controlled allocations. While \texttt{nvidia-smi} samples power intermittently~\cite{burtscher-power}, the low within-phase variance ($<$1.5\,W) on all devices confirms that idle power is stable enough for unbiased mean estimation. We do not evaluate MIG~\cite{nvidia-mig}, MPS~\cite{nvidia-mps}, or power capping (\texttt{nvidia-smi -pl}) configurations; these may alter the DVFS behavior we observe. Our \perfboost evaluation (\S\ref{sec:perf-boost}) tests two architectures (Hopper, Ampere); cross-variant validation (PCIe vs.\ SXM4) is discussed in \S\ref{sec:perf-boost}. The flag was not tested on L40S (Ada Lovelace) due to inventory constraints with recent drivers during the experimental window. Behavior on Ada Lovelace or under multi-tenant workloads may differ. Steady-state latency measurements ($n=50$) confirm no penalty at any percentile. A focused retest with a 60\,s idle soak confirms a one-time first-request DVFS ramp ($+$147--220\,ms) on both architectures, gone by request~2; whether this ramp varies with idle duration or model size is untested. Our multi-GPU experiments (\S\ref{sec:multi-gpu}) test tensor and data parallelism on a single 4$\times$H100~SXM node with NVLink; whether the linear scaling holds under pipeline parallelism, on 8-GPU nodes, across NVSwitch fabrics, in multi-node deployments over InfiniBand/RoCE, or on non-Hopper architectures under multi-GPU configurations is untested. We measure Qwen2.5-7B (7B parameters); larger models requiring more GPUs may exhibit different NCCL initialization or cold-start behavior. The flag-at-start prescription assumes the flag can be set per-process without side effects on co-located workloads; interaction with job schedulers, container runtimes, or MIG partitions is unexplored. Because \perfboost is an environment variable read at CUDA context creation, it cannot be toggled on a running process---deployments requiring mid-process behavior changes would need to restart the inference server or recreate the CUDA context. The scheduler evaluation uses synthetic traces; validation on production LLM serving logs---such as the cluster-scale telemetry collected by Lei et al.~\cite{lei-idle}---is a natural next step.
+\paragraph{Limitations.} We test one device per architecture in Phase~2 under a controlled within-subject design that isolates VRAM allocation as the sole manipulated variable, eliminating between-device confounders (silicon binning, cooling, power supply). Phase~1 complements this with \num{335267} samples across 14~H100 devices, bounding inter-device slope variation to below measurement sensitivity. All three architectures use $n=40$ per phase (20-minute recording windows). The primary Phase~2 experiments use \texttt{torch.empty} tensors; we validate with a real Qwen2.5-7B model, which on the H100 idles within 0.03\,W of an equal-context empty allocation, with the L40S real-model idle corroborating the context-active level (\S4.3, Table~\ref{tab:validation}). Cold-start power traces are captured on the H100; load times are measured on all three. Larger models may exhibit different loading profiles, though the VRAM-independence result is tested up to 72\,GB with controlled allocations. While \texttt{nvidia-smi} samples power intermittently~\cite{burtscher-power}, the low within-phase variance ($<$1.5\,W) on all devices confirms that idle power is stable enough for unbiased mean estimation. We do not evaluate MIG~\cite{nvidia-mig}, MPS~\cite{nvidia-mps}, or power capping (\texttt{nvidia-smi -pl}) configurations; these may alter the DVFS behavior we observe. Our \perfboost latency and throughput evaluation covers the H100 and A100 (with cross-variant validation on PCIe vs.\ SXM4, \S\ref{sec:perf-boost}); on the L40S and B200 we measured only idle-power recovery (the B200 with an $n=18$ protocol). Behavior under multi-tenant workloads may differ. Steady-state latency measurements ($n=50$) on the H100 and A100 show no penalty at any percentile, and a single-run H100 throughput test shows none under load, though repeated trials would be needed to characterize variance. A focused retest with a 60\,s idle soak confirms a one-time first-request DVFS ramp ($+$147--220\,ms) on both architectures, gone by request~2; whether this ramp varies with idle duration or model size is untested. Our multi-GPU experiments (\S\ref{sec:multi-gpu}) test tensor and data parallelism on a single 4$\times$H100~SXM node with NVLink; whether the linear scaling holds under pipeline parallelism, on 8-GPU nodes, across NVSwitch fabrics, in multi-node deployments over InfiniBand/RoCE, or on non-Hopper architectures under multi-GPU configurations is untested. We measure Qwen2.5-7B (7B parameters); larger models requiring more GPUs may exhibit different NCCL initialization or cold-start behavior. The flag-at-start prescription assumes the flag can be set per-process without side effects on co-located workloads; interaction with job schedulers, container runtimes, or MIG partitions is unexplored. Because \perfboost is an environment variable read at CUDA context creation, it cannot be toggled on a running process---deployments requiring mid-process behavior changes would need to restart the inference server or recreate the CUDA context. The scheduler evaluation uses synthetic traces; validation on production LLM serving logs---such as the cluster-scale telemetry collected by Lei et al.~\cite{lei-idle}---is a natural next step.
 
 % ===========================================================================
 \section{Conclusion}
 % ===========================================================================
 
-The model parking tax---26--66\,W per GPU depending on architecture---is a fixed cost of the CUDA context, not a variable cost of model size. VRAM occupancy contributes below 0.02\,W/GB on every device tested, across HBM3, HBM2e, and GDDR6. NVIDIA's \perfboost flag eliminates the tax within measurement noise on Hopper and Ampere with no steady-state latency penalty; the only cost is a transient ${\sim}150$\,ms ramp on the first request after idle, gone by the second request. The tax scales linearly with GPU count across all parallelism strategies tested, and the cold-start penalty does not compound with $N$---NCCL barriers synchronize all GPUs to ramp in parallel. With the flag set at process start, clocks drop to bare idle within 2\,s of the last request automatically, requiring no runtime intervention. At industry scale, the overhead represents 92--1{,}745\,GWh/year (base estimate 462\,GWh).
+The model parking tax---26--66\,W per GPU depending on architecture---is a fixed cost of the CUDA context, not a variable cost of model size. Across four architectures spanning HBM3, HBM2e, GDDR6, and HBM3e (Blackwell), in production and in controlled experiment, VRAM occupancy contributes below 0.02\,W/GB, statistically indistinguishable from zero. NVIDIA's \perfboost flag returns idle-with-context power to the bare-idle floor, recovering roughly 95--100\% of the overhead, with no steady-state latency penalty measured on the H100 and A100; the only cost is a transient ${\sim}150$\,ms ramp on the first request after idle, gone by the second request. The tax scales linearly with GPU count across all parallelism strategies tested, and the cold-start penalty does not compound with $N$---NCCL barriers synchronize all GPUs to ramp in parallel. With the flag set at process start, clocks drop to bare idle within 2\,s of the last request automatically, requiring no runtime intervention. At industry scale, a mid-range scenario places the recoverable overhead near \num{460}\,GWh/year (${\sim}180$\,kT CO$_2$), within a wider 92--\num{1745}\,GWh/year range that reflects fleet and duty-cycle uncertainty.
 
 Setting the flag at process start lets the DVFS governor handle idle-active transitions automatically. The audience for this prescription is infrastructure operators who bear the energy cost, not application developers who pay flat hourly rates. Native integration into inference-serving frameworks would help close this gap. Whether the prescription holds at scale, under multi-tenant workloads, and across architectures we did not test remains the open question.
 
